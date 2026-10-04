@@ -1,5 +1,7 @@
 /bin/
 /dist/
+/coverage.out
+/coverage-summary.out
 *.log
 /.agents/
 /.codex/

@@ -1,6 +1,7 @@
 # Sonos Paradise
 
 [![build](https://github.com/sgruendel/omarchy-sonos/actions/workflows/build.yaml/badge.svg)](https://github.com/sgruendel/omarchy-sonos/actions/workflows/build.yaml)
+[![Coverage](https://img.shields.io/badge/Coverage-79.5%25-brightgreen)](https://github.com/sgruendel/omarchy-sonos/actions/workflows/build.yaml)
 
 An Omarchy Quattro bar plugin with a dependency-free Go backend. Control local
 Sonos speakers and see Radio Paradise artwork, listener scores, your rating,
@@ -37,9 +38,14 @@ the current OS/architecture; rebuild for other machines. The source checkout's
 `sonos-backend` launcher expects `bin/omarchy-sonos`, so build before enabling it.
 
 GitHub Actions checks formatting, runs race-enabled tests and `go vet`, and builds
-the Go backend on pushes to `main` and pull requests. Tags starting with `v` also
-publish Linux amd64 and arm64 plugin bundles with SHA-256 checksums to GitHub
-Releases. Manual workflow runs build downloadable development artifacts.
+the Go backend on pushes to `main` and pull requests. Each successful test job
+uploads a coverage profile and function summary. Successful pushes and manual
+runs on `main` update the README coverage badge with a bot commit when its value
+changes; the badge job skips results if `main` has advanced since testing.
+The badge job needs permission to push to `main`, including any branch rules.
+Tags starting with `v` also publish Linux amd64 and arm64 plugin bundles with
+SHA-256 checksums to GitHub Releases. Manual workflow runs build downloadable
+development artifacts.
 Dependabot checks Go modules and GitHub Actions weekly.
 
 The Go entry point and state logic live in `main.go` and `app.go` at the repository
