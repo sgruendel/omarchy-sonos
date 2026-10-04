@@ -100,10 +100,10 @@ func TestRatingRevalidatesSongAndRoom(t *testing.T) {
 	for _, scenario := range []string{"current", "stale ID", "changed room", "changed song", "changed during metadata"} {
 		t.Run(scenario, func(t *testing.T) {
 			a, submissions, title, transition := fixture(t)
-			cmd := Command{Op: "rpRate", Room: "RINCON_A", SongID: 42, Rating: 10}
+			cmd := Command{Op: "rpRate", Room: "RINCON_A", SongID: new(int64(42)), Rating: new(10)}
 			switch scenario {
 			case "stale ID":
-				cmd.SongID = 1
+				cmd.SongID = new(int64(1))
 			case "changed room":
 				cmd.Room = "OTHER"
 			case "changed song":
@@ -204,13 +204,13 @@ func TestCommentsAppendAndResetOnSongChange(t *testing.T) {
 	a, _, title, _ := fixture(t)
 	a.Snapshot.RP.Comments.More = true
 	a.Snapshot.RP.Comments.Offset = 20
-	if err := a.Execute(t.Context(), Command{Op: "rpComments", SongID: 42, Offset: 20}); err != nil {
+	if err := a.Execute(t.Context(), Command{Op: "rpComments", SongID: new(int64(42)), Offset: new(20)}); err != nil {
 		t.Fatal(err)
 	}
 	if len(a.Snapshot.RP.Comments.Items) != 2 {
 		t.Fatal("page did not append")
 	}
-	if err := a.Execute(t.Context(), Command{Op: "rpComments", SongID: 43, Offset: 0}); err == nil {
+	if err := a.Execute(t.Context(), Command{Op: "rpComments", SongID: new(int64(43)), Offset: new(0)}); err == nil {
 		t.Fatal("accepted comments for a stale song")
 	}
 	*title = "New Track"
@@ -251,7 +251,7 @@ func TestGroupedRoomUsesCoordinatorForPlaybackAndRoomForVolume(t *testing.T) {
 		return base.RoundTrip(r)
 	})
 	a.Refresh(t.Context(), false)
-	if err := a.Execute(t.Context(), Command{Op: "adjustVolume", Delta: 5}); err != nil {
+	if err := a.Execute(t.Context(), Command{Op: "adjustVolume", Delta: new(5)}); err != nil {
 		t.Fatal(err)
 	}
 	if volumeCalls != 5 {

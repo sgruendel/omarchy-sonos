@@ -8,6 +8,7 @@ Item {
   property var manifest: null
   property var snapshot: ({status: "starting", rooms: [], playback: {}, account: {}, rp: {}})
   property string lastError: ""
+  property string lastDiagnostic: ""
   property bool busy: false
   property int requestCounter: 0
   property var pending: ({})
@@ -27,6 +28,7 @@ Item {
     pending = next
     busy = true
     lastError = ""
+    lastDiagnostic = ""
     backend.write(JSON.stringify(payload) + "\n")
   }
   function receive(line) {
@@ -50,10 +52,11 @@ Item {
     stdinEnabled: true
     stdout: SplitParser { onRead: function(line) { root.receive(line) } }
     // Never print backend input or authentication payloads to the shell log.
-    stderr: SplitParser { onRead: function(line) { root.lastError = String(line) } }
+    stderr: SplitParser { onRead: function(line) { root.lastDiagnostic = String(line) } }
     onExited: function(code) {
       root.busy = false
       root.pending = ({})
+      root.lastDiagnostic = ""
       root.snapshot = ({status: "offline", rooms: [], playback: {}, account: {}, rp: {}})
       if (!root.stopping) {
         root.lastError = root.lastError || "Backend stopped (" + code + ")"

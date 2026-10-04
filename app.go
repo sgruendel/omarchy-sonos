@@ -1,17 +1,12 @@
 package main
 
 import (
-	"bufio"
 	"context"
-	"encoding/json/jsontext"
-	"encoding/json/v2"
 	"errors"
 	"fmt"
-	"io"
 	"net/url"
 	"path/filepath"
 	"slices"
-	"strings"
 	"time"
 
 	"omarchy-sonos/rp"
@@ -40,32 +35,29 @@ type RadioParadise struct {
 	Comments      rp.Comments `json:"comments"`
 	CommentsError string      `json:"commentsError"`
 }
-type Snapshot struct {
-	Type     string          `json:"type"`
-	Version  int             `json:"version"`
-	Status   string          `json:"status"`
-	Error    string          `json:"error"`
-	Rooms    []sonos.Speaker `json:"rooms"`
-	Selected string          `json:"selected"`
-	Playback sonos.Playback  `json:"playback"`
-	Volume   int             `json:"volume"`
-	Mute     bool            `json:"mute"`
-	Account  Account         `json:"account"`
-	RP       RadioParadise   `json:"rp"`
+
+func emptyRP() RadioParadise {
+	return RadioParadise{
+		Channel:  -1,
+		Override: -1,
+		Comments: rp.Comments{Items: []rp.Comment{}},
+	}
 }
-type Command struct {
-	ID       string `json:"id"`
-	Op       string `json:"op"`
-	Room     string `json:"room"`
-	Volume   int    `json:"volume"`
-	Delta    int    `json:"delta"`
-	Mute     bool   `json:"mute"`
-	Channel  *int   `json:"channel"`
-	SongID   int64  `json:"songId"`
-	Rating   int    `json:"rating"`
-	Offset   int    `json:"offset"`
-	Username string `json:"username"`
-	Password string `json:"password"`
+
+type Snapshot struct {
+	Type           string          `json:"type"`
+	Version        int             `json:"version"`
+	BackendVersion string          `json:"backendVersion"`
+	RPMixes        []rp.Mix        `json:"rpMixes"`
+	Status         string          `json:"status"`
+	Error          string          `json:"error"`
+	Rooms          []sonos.Speaker `json:"rooms"`
+	Selected       string          `json:"selected"`
+	Playback       sonos.Playback  `json:"playback"`
+	Volume         int             `json:"volume"`
+	Mute           bool            `json:"mute"`
+	Account        Account         `json:"account"`
+	RP             RadioParadise   `json:"rp"`
 }
 type App struct {
 	Sonos           *sonos.Client
@@ -80,9 +72,14 @@ type App struct {
 	commentsSong    int64
 	lastComments    time.Time
 	ratings         map[int64]int
+	startupWarning  string
 }
 
 func newApp(dir string, hosts []string) (*App, error) {
+	version, err := manifestVersion()
+	if err != nil {
+		return nil, err
+	}
 	a := &App{
 		Sonos:           sonos.New(),
 		RP:              rp.New(filepath.Join(dir, "rp-session.json")),
@@ -105,18 +102,18 @@ func newApp(dir string, hosts []string) (*App, error) {
 		}
 	}
 	if err := a.RP.Load(); err != nil {
-		return nil, errors.New("could not load RP session")
+		// Decoder errors may include private data. Keep diagnostics generic.
+		a.startupWarning = "Could not load RP session; continuing signed out. Sign in again to replace it."
 	}
+	a.RP.UserAgent = "omarchy-sonos/" + version
 	a.Snapshot = Snapshot{
-		Type:    "snapshot",
-		Version: 1,
-		Status:  "starting",
-		Rooms:   []sonos.Speaker{},
-		RP: RadioParadise{
-			Channel:  -1,
-			Override: -1,
-			Comments: rp.Comments{Items: []rp.Comment{}},
-		},
+		Type:           "snapshot",
+		Version:        1,
+		BackendVersion: version,
+		RPMixes:        rp.Mixes(),
+		Status:         "starting",
+		Rooms:          []sonos.Speaker{},
+		RP:             emptyRP(),
 	}
 	return a, nil
 }
@@ -130,22 +127,9 @@ func (a *App) discover(ctx context.Context) error {
 			locations = append(locations, loc)
 		}
 	}
-	probe := func(locs []string) []sonos.Speaker {
-		for _, loc := range locs {
-			sp, err := a.Sonos.Describe(ctx, loc)
-			if err != nil {
-				continue
-			}
-			rooms, err := a.Sonos.Topology(ctx, sp)
-			if err == nil {
-				return rooms
-			}
-		}
-		return nil
-	}
-	rooms := probe(locations)
-	if len(rooms) == 0 {
-		rooms = probe(sonos.Discover(ctx, 3*time.Second))
+	rooms := a.probeLocations(ctx, locations)
+	if len(rooms) == 0 && ctx.Err() == nil {
+		rooms = a.probeLocations(ctx, sonos.Discover(ctx, 3*time.Second))
 	}
 	if len(rooms) == 0 {
 		return errors.New("no Sonos speakers found; check the LAN or configure SONOS_HOSTS")
@@ -184,7 +168,11 @@ func (a *App) targets() (sonos.Speaker, sonos.Speaker, error) {
 func (a *App) Refresh(ctx context.Context, force bool) {
 	a.Snapshot.Error = ""
 	a.Snapshot.Account = Account{Authenticated: a.RP.Authenticated(), Username: a.RP.Session.Username}
-	if force || time.Since(a.lastDiscovery) > 60*time.Second {
+	interval := time.Minute
+	if a.Snapshot.Status == "offline" {
+		interval = 10 * time.Second
+	}
+	if force || time.Since(a.lastDiscovery) >= interval {
 		if err := a.discover(ctx); err != nil {
 			a.Snapshot.Rooms = []sonos.Speaker{}
 			a.Snapshot.Status = "offline"
@@ -196,14 +184,18 @@ func (a *App) Refresh(ctx context.Context, force bool) {
 	if err != nil {
 		a.Snapshot.Status = "offline"
 		a.Snapshot.Playback = sonos.Playback{Actions: []string{}}
-		a.Snapshot.RP = RadioParadise{Channel: -1, Override: -1, Comments: rp.Comments{Items: []rp.Comment{}}}
+		a.Snapshot.RP = emptyRP()
+		if a.Snapshot.Error == "" {
+			a.Snapshot.Error = err.Error()
+		}
 		return
 	}
 	p, err := a.Sonos.Playback(ctx, coordinator)
 	if err != nil {
 		a.Snapshot.Status = "offline"
 		a.Snapshot.Error = err.Error()
-		a.Snapshot.RP = RadioParadise{Channel: -1, Override: -1, Comments: rp.Comments{Items: []rp.Comment{}}}
+		a.Snapshot.Playback = sonos.Playback{Actions: []string{}}
+		a.Snapshot.RP = emptyRP()
 		return
 	}
 	a.Snapshot.Playback = p
@@ -230,7 +222,11 @@ func (a *App) refreshRP(ctx context.Context) {
 		detected = true
 		channel = override
 	}
-	next := RadioParadise{Detected: detected, Channel: channel, ChannelName: rp.Channels[channel], Override: override, Comments: rp.Comments{Items: []rp.Comment{}}}
+	next := emptyRP()
+	next.Detected = detected
+	next.Channel = channel
+	next.ChannelName = rp.Channels[channel]
+	next.Override = override
 	defer func() { a.Snapshot.RP = next }()
 	if !detected {
 		return
@@ -284,233 +280,4 @@ func (a *App) refreshRP(ctx context.Context) {
 			next.CommentsError = ""
 		}
 	}
-}
-func (a *App) Execute(ctx context.Context, c Command) error {
-	switch c.Op {
-	case "refresh":
-		a.lastPlaylist = time.Time{}
-		a.Refresh(ctx, true)
-		return nil
-	case "selectRoom":
-		if !slices.ContainsFunc(a.Snapshot.Rooms, func(s sonos.Speaker) bool { return s.UID == c.Room }) {
-			return errors.New("unknown room")
-		}
-		a.State.Selected = c.Room
-		a.lastPlaylist = time.Time{}
-		return a.save()
-	case "rpLogin":
-		if err := a.RP.Login(ctx, c.Username, c.Password); err != nil {
-			return err
-		}
-		a.lastPlaylist = time.Time{}
-		a.lastComments = time.Time{}
-		a.ratings = map[int64]int{}
-		return nil
-	case "rpLogout":
-		if err := a.RP.Logout(); err != nil {
-			return err
-		}
-		a.lastPlaylist = time.Time{}
-		a.ratings = map[int64]int{}
-		return nil
-	case "rpChannel":
-		if c.Channel == nil {
-			return errors.New("channel is required")
-		}
-		if *c.Channel == -1 {
-			delete(a.State.Channels, a.State.Selected)
-		} else {
-			if _, ok := rp.Channels[*c.Channel]; !ok {
-				return errors.New("invalid RP mix")
-			}
-			a.State.Channels[a.State.Selected] = *c.Channel
-		}
-		a.lastPlaylist = time.Time{}
-		return a.save()
-	case "rpRate":
-		if c.Rating < 1 || c.Rating > 10 {
-			return errors.New("rating must be between 1 and 10")
-		}
-		if c.Room != a.State.Selected {
-			return errors.New("selected room changed; try again")
-		}
-		a.lastPlaylist = time.Time{}
-		a.Refresh(ctx, true)
-		current := a.Snapshot.RP
-		if c.Room != a.State.Selected || a.Snapshot.Status != "ready" || !current.CanRate || current.Song == nil || current.Song.ID != c.SongID {
-			return errors.New("song changed or cannot be identified; refresh before rating")
-		}
-		// Metadata/comments requests can take seconds. Check the speaker again immediately
-		// before submission so a song transition while those requests ran cannot be rated.
-		_, coordinator, err := a.targets()
-		if err != nil {
-			return err
-		}
-		latest, err := a.Sonos.Playback(ctx, coordinator)
-		if err != nil || latest.State != "PLAYING" || latest.URI != a.Snapshot.Playback.URI || latest.TrackURI != a.Snapshot.Playback.TrackURI || !rp.Matches(*current.Song, latest.Title, latest.Artist, latest.StreamContent) {
-			return errors.New("song changed before rating; try again")
-		}
-		if err := a.RP.Rate(ctx, c.SongID, c.Rating); err != nil {
-			return err
-		}
-		a.ratings[c.SongID] = c.Rating
-		return nil
-	case "rpComments":
-		current := a.Snapshot.RP
-		if current.Song == nil || current.Song.ID != c.SongID {
-			return errors.New("song changed; reload comments")
-		}
-		if c.Offset != 0 && c.Offset != current.Comments.Offset {
-			return errors.New("invalid comments page")
-		}
-		page, err := a.RP.Comments(ctx, c.SongID, c.Offset)
-		if err != nil {
-			return err
-		}
-		if c.Offset > 0 {
-			page.Items = append(current.Comments.Items, page.Items...)
-		}
-		a.Snapshot.RP.Comments = page
-		a.Snapshot.RP.CommentsError = ""
-		a.lastComments = time.Now()
-		return nil
-	}
-	if a.Snapshot.Status != "ready" {
-		return errors.New("Sonos is offline")
-	}
-	room, coordinator, err := a.targets()
-	if err != nil {
-		return err
-	}
-	switch c.Op {
-	case "setVolume":
-		return a.Sonos.SetVolume(ctx, room, c.Volume)
-	case "adjustVolume":
-		volume, _, err := a.Sonos.Volume(ctx, room)
-		if err != nil {
-			return err
-		}
-		return a.Sonos.SetVolume(ctx, room, max(0, min(100, volume+c.Delta)))
-	case "setMute":
-		return a.Sonos.SetMute(ctx, room, c.Mute)
-	case "playPause", "next", "previous":
-		p, err := a.Sonos.Playback(ctx, coordinator)
-		if err != nil {
-			return err
-		}
-		action := "Play"
-		if c.Op == "playPause" && p.State == "PLAYING" {
-			action = "Pause"
-		}
-		if c.Op == "next" {
-			action = "Next"
-		}
-		if c.Op == "previous" {
-			action = "Previous"
-		}
-		if !slices.Contains(p.Actions, action) {
-			return fmt.Errorf("%s is unavailable for this source", action)
-		}
-		return a.Sonos.Transport(ctx, coordinator, action)
-	default:
-		return fmt.Errorf("unknown command %q", c.Op)
-	}
-}
-
-// Run serializes all commands and snapshots; EOF terminates the owned backend process.
-func (a *App) Run(ctx context.Context, in io.Reader, out io.Writer, once bool) error {
-	enc := jsontext.NewEncoder(out)
-	emit := func() error { return json.MarshalEncode(enc, a.Snapshot) }
-	refresh := func(force bool) {
-		requestCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
-		defer cancel()
-		a.Refresh(requestCtx, force)
-	}
-	if err := emit(); err != nil {
-		return err
-	}
-	refresh(true)
-	if err := emit(); err != nil {
-		return err
-	}
-	if once {
-		return nil
-	}
-	type input struct {
-		line []byte
-		err  error
-	}
-	lines := make(chan input, 16)
-	go func() {
-		defer close(lines)
-		scanner := bufio.NewScanner(in)
-		scanner.Buffer(make([]byte, 4096), 64<<10)
-		for scanner.Scan() {
-			line := slices.Clone(scanner.Bytes())
-			select {
-			case lines <- input{line: line}:
-			case <-ctx.Done():
-				return
-			}
-		}
-		if err := scanner.Err(); err != nil {
-			select {
-			case lines <- input{err: err}:
-			case <-ctx.Done():
-			}
-		}
-	}()
-	ticker := time.NewTicker(3 * time.Second)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return nil
-		case line, ok := <-lines:
-			if !ok {
-				return nil
-			}
-			if line.err != nil {
-				return line.err
-			}
-			var c Command
-			err := json.Unmarshal(line.line, &c)
-			if err != nil {
-				err = errors.New("invalid command JSON")
-			} else {
-				requestCtx, cancel := context.WithTimeout(ctx, 25*time.Second)
-				err = a.Execute(requestCtx, c)
-				cancel()
-			}
-			result := map[string]any{"type": "result", "id": c.ID, "ok": err == nil}
-			if err != nil {
-				result["error"] = err.Error()
-			}
-			if e := json.MarshalEncode(enc, result); e != nil {
-				return e
-			}
-			if err == nil && c.Op != "refresh" {
-				refresh(false)
-			}
-			if e := emit(); e != nil {
-				return e
-			}
-		case <-ticker.C:
-			refresh(false)
-			if err := emit(); err != nil {
-				return err
-			}
-		}
-	}
-}
-
-// parseHosts accepts comma-separated local IPs, never URLs or credentials.
-func parseHosts(value string) []string {
-	var hosts []string
-	for _, h := range strings.Split(value, ",") {
-		if h = strings.TrimSpace(h); h != "" {
-			hosts = append(hosts, h)
-		}
-	}
-	return hosts
 }

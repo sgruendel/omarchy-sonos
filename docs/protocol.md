@@ -6,12 +6,18 @@ backend shared by all widget instances.
 
 JSON uses UTF-8 and unique object member names. Command fields are case-sensitive;
 invalid UTF-8 or duplicate members produce an `invalid command JSON` result.
+Required numeric and boolean fields must be present and non-null. Explicit zero
+and false values remain valid where allowed, including volume 0, mute false,
+delta 0, and comment offset 0.
 
 Every command has a string `id` and an `op`. Results are
 `{"type":"result","id":"1","ok":true}` or include `ok:false` and `error`.
 A snapshot follows every command, including errors. Snapshots have `version:1`,
 `status` (`starting`, `ready`, `offline`), `rooms`, `selected`, `playback`,
 `volume`, `mute`, `account`, and `rp`. Session tokens/passwords are never included.
+The `backendVersion` field comes from the embedded plugin manifest; `version`
+remains the protocol version. `rpMixes` contains the supported `{id,name}` choices,
+including Automatic (-1), and drives the widget's mix selector.
 `rp.song` is null until matched against the speaker. Comment failures are separate
 from metadata failures so they do not disable rating an identified track.
 

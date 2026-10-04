@@ -55,6 +55,9 @@ func TestAccountMetadataCommentsAndRating(t *testing.T) {
 	ctx := t.Context()
 	ratings := 0
 	srv := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.UserAgent() != "omarchy-sonos/test-version" {
+			t.Errorf("wrong User-Agent: %s", r.UserAgent())
+		}
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Path != "/api/auth" {
 			for name, want := range map[string]string{"C_username": "tester", "C_passwd": "secret-token", "C_user_id": "123", "C_validated": "yes"} {
@@ -89,6 +92,7 @@ func TestAccountMetadataCommentsAndRating(t *testing.T) {
 	}))
 	path := filepath.Join(t.TempDir(), "private", "rp-session.json")
 	c := New(path)
+	c.UserAgent = "omarchy-sonos/test-version"
 	c.HTTP.Transport = srv.Client().Transport
 	c.Base = srv.URL
 	if err := c.Rate(ctx, 42, 10); err == nil {
@@ -106,6 +110,7 @@ func TestAccountMetadataCommentsAndRating(t *testing.T) {
 		t.Fatal("session is not private")
 	}
 	restored := New(path)
+	restored.UserAgent = c.UserAgent
 	restored.HTTP.Transport = srv.Client().Transport
 	restored.Base = srv.URL
 	if err := restored.Load(); err != nil || !restored.Authenticated() {
@@ -142,6 +147,18 @@ func TestAccountMetadataCommentsAndRating(t *testing.T) {
 	}
 	if _, err = os.Stat(path); !os.IsNotExist(err) {
 		t.Fatal("session still exists")
+	}
+}
+
+func TestMixesIncludeAllSupportedChannels(t *testing.T) {
+	mixes := Mixes()
+	if len(mixes) != len(Channels)+1 || mixes[0].ID != -1 {
+		t.Fatal("missing automatic selection or supported mixes")
+	}
+	for i, mix := range mixes[1:] {
+		if mix.Name != Channels[mix.ID] || (i > 0 && mix.ID <= mixes[i].ID) {
+			t.Fatalf("mix list drifted from supported channels: %+v", mixes)
+		}
 	}
 }
 func TestErrorsNeverExposePasswordOrToken(t *testing.T) {
