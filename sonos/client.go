@@ -180,6 +180,12 @@ func (c *Client) Call(ctx context.Context, s Speaker, service, action string, ar
 	return values, nil
 }
 
+// ErrIncompleteTopology indicates that some visible rooms could not be described.
+// Topology still returns the reachable rooms alongside this error.
+var ErrIncompleteTopology = errors.New("Sonos topology contains unreachable rooms")
+
+// Topology returns visible rooms, sorted by name. An incomplete result includes
+// the reachable rooms and ErrIncompleteTopology.
 func (c *Client) Topology(ctx context.Context, s Speaker) ([]Speaker, error) {
 	v, err := c.Call(ctx, s, "ZoneGroupTopology", "GetZoneGroupState", nil)
 	if err != nil {
@@ -200,6 +206,7 @@ func (c *Client) Topology(ctx context.Context, s Speaker) ([]Speaker, error) {
 		return nil, err
 	}
 	var out []Speaker
+	incomplete := false
 	for _, g := range state.Groups {
 		for _, m := range g.Members {
 			if m.Invisible == "1" {
@@ -207,6 +214,7 @@ func (c *Client) Topology(ctx context.Context, s Speaker) ([]Speaker, error) {
 			}
 			sp, err := c.Describe(ctx, m.Location)
 			if err != nil {
+				incomplete = true
 				continue
 			}
 			sp.UID = m.UID
@@ -219,6 +227,9 @@ func (c *Client) Topology(ctx context.Context, s Speaker) ([]Speaker, error) {
 		return nil, errors.New("Sonos topology contains no reachable rooms")
 	}
 	slices.SortFunc(out, func(a, b Speaker) int { return cmp.Compare(a.Name, b.Name) })
+	if incomplete {
+		return out, ErrIncompleteTopology
+	}
 	return out, nil
 }
 func seconds(s string) int {

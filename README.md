@@ -89,7 +89,9 @@ SSDP discovery runs on active IPv4 interfaces. Cached speaker IPs are tried
 first. Playback and volume are polled every 3 seconds, topology/discovery every
 60 seconds while online and every 10 seconds while offline, the RP playlist
 every 15 seconds, and comments every 2 minutes. Up to four discovery probes
-run concurrently; a successful topology cancels the remaining probes.
+run concurrently; only a complete topology cancels the remaining probes. If
+every probe is incomplete, discovery keeps the result with the most reachable
+rooms, preferring earlier cached hosts on ties.
 Requests have timeouts. No inbound callback listener or subnet scan is used.
 
 If multicast is unavailable, provide a speaker IP when launching the shell with

@@ -1,6 +1,7 @@
 package sonos
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -9,6 +10,51 @@ import (
 	"strings"
 	"testing"
 )
+
+func TestTopologyReportsIncompleteVisibleRooms(t *testing.T) {
+	for _, tt := range []struct {
+		name       string
+		invisible  string
+		status     int
+		wantRooms  int
+		incomplete bool
+	}{
+		{"all visible rooms reachable", "0", http.StatusOK, 2, false},
+		{"visible room unreachable", "0", http.StatusServiceUnavailable, 1, true},
+		{"invisible room unreachable", "1", http.StatusServiceUnavailable, 1, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var serverURL string
+			srv := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodGet {
+					if r.URL.Path == "/second" {
+						w.WriteHeader(tt.status)
+						if tt.status != http.StatusOK {
+							return
+						}
+					}
+					fmt.Fprint(w, `<root><device><serviceList><service><serviceType>urn:schemas-upnp-org:service:AVTransport:1</serviceType><controlURL>/transport</controlURL></service></serviceList></device></root>`)
+					return
+				}
+				state := fmt.Sprintf(`<ZoneGroupState><ZoneGroups><ZoneGroup Coordinator="A"><ZoneGroupMember UUID="A" ZoneName="First" Location="%s/first"/><ZoneGroupMember UUID="B" ZoneName="Second" Invisible="%s" Location="%s/second"/></ZoneGroup></ZoneGroups></ZoneGroupState>`, serverURL, tt.invisible, serverURL)
+				fmt.Fprintf(w, "<Envelope><Body><Response><ZoneGroupState>%s</ZoneGroupState></Response></Body></Envelope>", escape(state))
+			}))
+			c := New()
+			c.HTTP.Transport = srv.Client().Transport
+			serverURL = srv.URL
+			speaker := Speaker{URL: srv.URL, Services: map[string]Service{
+				"ZoneGroupTopology": {Type: "urn:schemas-upnp-org:service:ZoneGroupTopology:1", Control: "/topology"},
+			}}
+			rooms, err := c.Topology(t.Context(), speaker)
+			if errors.Is(err, ErrIncompleteTopology) != tt.incomplete || (!tt.incomplete && err != nil) {
+				t.Fatalf("topology error = %v, want incomplete = %v", err, tt.incomplete)
+			}
+			if len(rooms) != tt.wantRooms || rooms[0].UID != "A" || rooms[0].Coordinator != "A" {
+				t.Fatalf("reachable topology rooms: %+v, want %d", rooms, tt.wantRooms)
+			}
+		})
+	}
+}
 
 func TestSOAPTopologyPlaybackAndControls(t *testing.T) {
 	var serverURL string
