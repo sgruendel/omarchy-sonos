@@ -273,8 +273,12 @@ func (c *Client) Playback(ctx context.Context, s Speaker) (Playback, error) {
 	if p.Artwork != "" {
 		base, _ := url.Parse(s.URL)
 		art, e := url.Parse(p.Artwork)
+		p.Artwork = ""
 		if e == nil {
-			p.Artwork = base.ResolveReference(art).String()
+			resolved := base.ResolveReference(art)
+			if (resolved.Scheme == "http" || resolved.Scheme == "https") && resolved.Host != "" {
+				p.Artwork = resolved.String()
+			}
 		}
 	}
 	actions, err := c.Call(ctx, s, "AVTransport", "GetCurrentTransportActions", args)

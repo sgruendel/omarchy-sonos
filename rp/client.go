@@ -53,6 +53,7 @@ type Client struct {
 	Base        string
 	Session     Session
 	SessionPath string
+	UserAgent   string
 }
 
 var ErrCommentsAuth = errors.New("Sign in to Radio Paradise to read song comments")
@@ -76,16 +77,25 @@ func New(path string) *Client {
 		},
 		Base:        "https://api.radioparadise.com",
 		SessionPath: path,
+		UserAgent:   "omarchy-sonos",
 	}
 }
 func (c *Client) Authenticated() bool { return c.Session.PasswordToken != "" && c.Session.UserID != "" }
-func (c *Client) Load() error         { return storage.Load(c.SessionPath, &c.Session) }
+func (c *Client) Load() error {
+	c.Session = Session{}
+	var session Session
+	if err := storage.Load(c.SessionPath, &session); err != nil {
+		return err
+	}
+	c.Session = session
+	return nil
+}
 func (c *Client) request(ctx context.Context, path string, params url.Values, out any) error {
 	req, err := http.NewRequestWithContext(ctx, "GET", c.Base+path+"?"+params.Encode(), nil)
 	if err != nil {
 		return errors.New("could not create RP request")
 	}
-	req.Header.Set("User-Agent", "omarchy-sonos/0.1")
+	req.Header.Set("User-Agent", c.UserAgent)
 	if c.Authenticated() {
 		for _, cookie := range []*http.Cookie{
 			{Name: "player_id", Value: "omarchy-sonos"},

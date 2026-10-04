@@ -117,3 +117,33 @@ func TestSOAPFaultAndSSDPValidation(t *testing.T) {
 		t.Fatal("public IP accepted")
 	}
 }
+
+func TestPlaybackArtworkURLs(t *testing.T) {
+	for _, tt := range []struct {
+		art, want string
+	}{
+		{"/art.jpg", "http://speaker.example/art.jpg"},
+		{"https://cdn.example/art.jpg", "https://cdn.example/art.jpg"},
+		{"//cdn.example/art.jpg", "http://cdn.example/art.jpg"},
+		{"file:///etc/passwd", ""},
+		{"javascript:alert(1)", ""},
+		{"data:image/png;base64,AAAA", ""},
+		{"ftp://cdn.example/art.jpg", ""},
+	} {
+		t.Run(tt.art, func(t *testing.T) {
+			srv := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				payload := ""
+				if strings.Contains(r.Header.Get("SOAPACTION"), "#GetPositionInfo") {
+					payload = "<TrackMetaData>" + escape(`<DIDL-Lite><item><albumArtURI>`+escape(tt.art)+`</albumArtURI></item></DIDL-Lite>`) + "</TrackMetaData>"
+				}
+				fmt.Fprintf(w, "<Envelope><Body><Response>%s</Response></Body></Envelope>", payload)
+			}))
+			c := New()
+			c.HTTP.Transport = srv.Client().Transport
+			p, err := c.Playback(t.Context(), Speaker{URL: "http://speaker.example", Services: map[string]Service{"AVTransport": {Type: "urn:AVTransport:1", Control: "/"}}})
+			if err != nil || p.Artwork != tt.want {
+				t.Fatalf("artwork = %q, want %q, err=%v", p.Artwork, tt.want, err)
+			}
+		})
+	}
+}

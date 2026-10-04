@@ -4,6 +4,7 @@ package storage
 import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
+	"errors"
 	"os"
 	"path/filepath"
 )
@@ -38,12 +39,20 @@ func Save(path string, value any) error {
 	return os.Rename(f.Name(), path)
 }
 func Load(path string, value any) error {
-	data, err := os.ReadFile(path)
+	f, err := os.Open(path)
 	if os.IsNotExist(err) {
 		return nil
 	}
 	if err != nil {
 		return err
 	}
-	return json.Unmarshal(data, value)
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return err
+	}
+	if info.Mode().Perm()&0077 != 0 {
+		return errors.New("private state file has group or other permissions")
+	}
+	return json.UnmarshalRead(f, value)
 }

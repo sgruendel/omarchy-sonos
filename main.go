@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 )
 
@@ -29,10 +30,24 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+	if a.startupWarning != "" {
+		fmt.Fprintln(os.Stderr, a.startupWarning)
+	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 	if err = a.Run(ctx, os.Stdin, os.Stdout, *once); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
+}
+
+// parseHosts accepts comma-separated local IPs, never URLs or credentials.
+func parseHosts(value string) []string {
+	var hosts []string
+	for _, h := range strings.Split(value, ",") {
+		if h = strings.TrimSpace(h); h != "" {
+			hosts = append(hosts, h)
+		}
+	}
+	return hosts
 }

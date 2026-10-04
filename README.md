@@ -42,11 +42,17 @@ publish Linux amd64 and arm64 plugin bundles with SHA-256 checksums to GitHub
 Releases. Manual workflow runs build downloadable development artifacts.
 Dependabot checks Go modules and GitHub Actions weekly.
 
-The Go entry point and application loop live in `main.go` and `app.go` at the
-repository root. The `sonos` package owns local speaker discovery and UPnP,
+The Go entry point and state logic live in `main.go` and `app.go` at the repository
+root; `commands.go`, `protocol.go`, and `discovery.go` own command dispatch,
+JSON Lines framing, and concurrent discovery probes. The `sonos` package owns
+local speaker discovery and UPnP,
 `rp` owns Radio Paradise metadata and accounts, and `storage` handles atomic
 private JSON state files. Build the backend from the root with `make build`
 or `go build .`.
+
+The plugin version is embedded from `manifest.json` into the backend and used
+in RP's User-Agent and snapshots. RP mixes also come from the backend, keeping
+the widget's selector in sync with supported channels.
 
 ## Use
 
@@ -81,7 +87,9 @@ the RP request; these independent systems provide no atomic operation.
 
 SSDP discovery runs on active IPv4 interfaces. Cached speaker IPs are tried
 first. Playback and volume are polled every 3 seconds, topology/discovery every
-60 seconds, the RP playlist every 15 seconds, and comments every 2 minutes.
+60 seconds while online and every 10 seconds while offline, the RP playlist
+every 15 seconds, and comments every 2 minutes. Up to four discovery probes
+run concurrently; a successful topology cancels the remaining probes.
 Requests have timeouts. No inbound callback listener or subnet scan is used.
 
 If multicast is unavailable, provide a speaker IP when launching the shell with
@@ -108,7 +116,10 @@ State lives in `${XDG_STATE_HOME:-~/.local/state}/sgruendel.sonos`:
 - `rp-session.json`: RP username, user ID, and password-derived session token.
 
 Files are atomically replaced with mode `0600`; newly created directories use
-`0700`. The RP password is sent through the backend's stdin and is not saved or
+`0700`. Existing files with group or other permissions are rejected. If the RP
+session cannot be loaded, the backend continues signed out and emits a generic
+diagnostic; signing in again replaces the session with a private file.
+The RP password is sent through the backend's stdin and is not saved or
 logged. The session token is a secret stored in a local file, not a keyring. The
 widget clears the password field on submission/close. Tokens stay out of stdout.
 RP's auth API uses HTTPS query parameters, as in rptui; errors never echo these
@@ -126,7 +137,7 @@ validator. Tests use simulated Sonos SOAP and RP HTTP servers, including song
 transitions, API failures, auth persistence, and comment pagination. A local
 hardware/account acceptance checklist is in [docs/acceptance.md](docs/acceptance.md).
 
-Optional checks: `./scripts/check-qml.sh` checks QML with installed Omarchy
+Optional checks: `make check-qml` checks QML with installed Omarchy
 imports (Qt may report static type warnings for dynamic shell properties).
 `RP_LIVE_TEST=1 go test -run TestLivePublicRP -v ./rp` checks the public RP
 playlist endpoint without credentials or mutations.
