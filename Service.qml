@@ -56,6 +56,7 @@ Item {
     onExited: function(code) {
       root.busy = false
       root.pending = ({})
+      root.lastDiagnostic = ""
       root.snapshot = ({status: "offline", rooms: [], playback: {}, account: {}, rp: {}})
       if (!root.stopping) {
         root.lastError = root.lastError || "Backend stopped (" + code + ")"

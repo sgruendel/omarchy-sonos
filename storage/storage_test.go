@@ -69,29 +69,54 @@ func TestFailedSavePreservesExistingState(t *testing.T) {
 	}
 }
 
-func TestLoadMissingMalformedAndLoosePermissions(t *testing.T) {
-	dir := t.TempDir()
-	var got map[string]string
-	if err := Load(filepath.Join(dir, "missing.json"), &got); err != nil || got != nil {
-		t.Fatalf("missing state: %v", err)
-	}
+func TestLoadMissingAndMalformed(t *testing.T) {
 	for _, tt := range []struct {
-		name, data string
-		mode       os.FileMode
+		name string
+		load func(string, any) error
 	}{
-		{"malformed", `{"token":`, 0600},
-		{"public", `{"token":"private"}`, 0644},
+		{"state", Load},
+		{"private", LoadPrivate},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			path := filepath.Join(dir, tt.name+".json")
-			if err := os.WriteFile(path, []byte(tt.data), tt.mode); err != nil {
+			path := filepath.Join(t.TempDir(), "state.json")
+			var got map[string]string
+			if err := tt.load(path, &got); err != nil || got != nil {
+				t.Fatalf("missing state: %v", err)
+			}
+			if err := os.WriteFile(path, []byte(`{"token":`), 0600); err != nil {
 				t.Fatal(err)
 			}
-			if err := os.Chmod(path, tt.mode); err != nil {
+			if err := tt.load(path, &got); err == nil {
+				t.Fatal("malformed state accepted")
+			}
+		})
+	}
+}
+
+func TestLoadPermissionsRequiredOnlyForPrivateState(t *testing.T) {
+	for _, mode := range []os.FileMode{0600, 0640, 0644} {
+		t.Run(mode.String(), func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "state.json")
+			if err := os.WriteFile(path, []byte(`{"value":"saved"}`), mode); err != nil {
 				t.Fatal(err)
 			}
-			if err := Load(path, &got); err == nil {
-				t.Fatal("invalid private state accepted")
+			if err := os.Chmod(path, mode); err != nil {
+				t.Fatal(err)
+			}
+			var state map[string]string
+			if err := Load(path, &state); err != nil || state["value"] != "saved" {
+				t.Fatalf("non-secret state rejected: %v", err)
+			}
+			var private map[string]string
+			err := LoadPrivate(path, &private)
+			if mode == 0600 {
+				if err != nil || private["value"] != "saved" {
+					t.Fatalf("private state rejected: %v", err)
+				}
+				return
+			}
+			if err == nil || private != nil {
+				t.Fatal("loose private state was not rejected before decoding")
 			}
 		})
 	}

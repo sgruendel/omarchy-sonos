@@ -84,7 +84,7 @@ func (c *Client) Authenticated() bool { return c.Session.PasswordToken != "" && 
 func (c *Client) Load() error {
 	c.Session = Session{}
 	var session Session
-	if err := storage.Load(c.SessionPath, &session); err != nil {
+	if err := storage.LoadPrivate(c.SessionPath, &session); err != nil {
 		return err
 	}
 	c.Session = session

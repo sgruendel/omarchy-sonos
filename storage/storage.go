@@ -1,4 +1,4 @@
-// Package storage persists private JSON state with atomic replacement.
+// Package storage persists JSON state with private, atomic replacement.
 package storage
 
 import (
@@ -38,7 +38,18 @@ func Save(path string, value any) error {
 	}
 	return os.Rename(f.Name(), path)
 }
+
+// Load decodes JSON state. Missing files leave value unchanged.
 func Load(path string, value any) error {
+	return load(path, value, false)
+}
+
+// LoadPrivate also rejects files with group or other permissions before decoding.
+func LoadPrivate(path string, value any) error {
+	return load(path, value, true)
+}
+
+func load(path string, value any, private bool) error {
 	f, err := os.Open(path)
 	if os.IsNotExist(err) {
 		return nil
@@ -47,12 +58,14 @@ func Load(path string, value any) error {
 		return err
 	}
 	defer f.Close()
-	info, err := f.Stat()
-	if err != nil {
-		return err
-	}
-	if info.Mode().Perm()&0077 != 0 {
-		return errors.New("private state file has group or other permissions")
+	if private {
+		info, err := f.Stat()
+		if err != nil {
+			return err
+		}
+		if info.Mode().Perm()&0077 != 0 {
+			return errors.New("private state file has group or other permissions")
+		}
 	}
 	return json.UnmarshalRead(f, value)
 }

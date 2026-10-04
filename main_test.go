@@ -7,7 +7,39 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"omarchy-sonos/storage"
 )
+
+func TestRestoredSpeakerStatePreservesPreferencesAndRepairsPermissions(t *testing.T) {
+	for _, mode := range []os.FileMode{0640, 0644} {
+		t.Run(mode.String(), func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, "state.json")
+			want := State{Selected: "RINCON_A", Hosts: []string{"192.168.1.3"}, Channels: map[string]int{"RINCON_A": 2}}
+			if err := storage.Save(path, want); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chmod(path, mode); err != nil {
+				t.Fatal(err)
+			}
+			a, err := newApp(dir, nil)
+			if err != nil {
+				t.Fatalf("restored non-secret state prevented startup: %v", err)
+			}
+			if a.State.Selected != want.Selected || !slices.Equal(a.State.Hosts, want.Hosts) || a.State.Channels["RINCON_A"] != 2 || a.startupWarning != "" {
+				t.Fatalf("restored preferences were lost: %+v, warning %q", a.State, a.startupWarning)
+			}
+			if err := a.save(); err != nil {
+				t.Fatal(err)
+			}
+			info, err := os.Stat(path)
+			if err != nil || info.Mode().Perm() != 0600 {
+				t.Fatalf("save did not repair restored state permissions: %v, %v", info, err)
+			}
+		})
+	}
+}
 
 func TestCorruptSessionDoesNotPreventStartup(t *testing.T) {
 	for _, tt := range []struct {

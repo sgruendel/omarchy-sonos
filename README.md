@@ -118,9 +118,11 @@ State lives in `${XDG_STATE_HOME:-~/.local/state}/sgruendel.sonos`:
 - `rp-session.json`: RP username, user ID, and password-derived session token.
 
 Files are atomically replaced with mode `0600`; newly created directories use
-`0700`. Existing files with group or other permissions are rejected. If the RP
+`0700`. RP session files with group or other permissions are rejected. If the
 session cannot be loaded, the backend continues signed out and emits a generic
-diagnostic; signing in again replaces the session with a private file.
+diagnostic; signing in again replaces the session with a private file. Non-secret
+`state.json` remains readable after a restore or migration with looser permissions;
+the next successful save resets its permissions to `0600`.
 The RP password is sent through the backend's stdin and is not saved or
 logged. The session token is a secret stored in a local file, not a keyring. The
 widget clears the password field on submission/close. Tokens stay out of stdout.
