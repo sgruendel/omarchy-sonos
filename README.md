@@ -42,6 +42,12 @@ publish Linux amd64 and arm64 plugin bundles with SHA-256 checksums to GitHub
 Releases. Manual workflow runs build downloadable development artifacts.
 Dependabot checks Go modules and GitHub Actions weekly.
 
+The Go entry point and application loop live in `main.go` and `app.go` at the
+repository root. The `sonos` package owns local speaker discovery and UPnP,
+`rp` owns Radio Paradise metadata and accounts, and `storage` handles atomic
+private JSON state files. Build the backend from the root with `make build`
+or `go build .`.
+
 ## Use
 
 - Left click opens the controller; Escape or an outside click closes it.
@@ -122,7 +128,7 @@ hardware/account acceptance checklist is in [docs/acceptance.md](docs/acceptance
 
 Optional checks: `./scripts/check-qml.sh` checks QML with installed Omarchy
 imports (Qt may report static type warnings for dynamic shell properties).
-`RP_LIVE_TEST=1 go test -run TestLivePublicRP -v ./internal/rp` checks the public RP
+`RP_LIVE_TEST=1 go test -run TestLivePublicRP -v ./rp` checks the public RP
 playlist endpoint without credentials or mutations.
 
 This first version implements room selection, transport, room volume/mute, RP

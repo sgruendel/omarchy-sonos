@@ -1,7 +1,6 @@
 package rp
 
 import (
-	"context"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -53,7 +52,7 @@ func TestDetectionAndMatching(t *testing.T) {
 	}
 }
 func TestAccountMetadataCommentsAndRating(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	ratings := 0
 	srv := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -152,12 +151,12 @@ func TestErrorsNeverExposePasswordOrToken(t *testing.T) {
 	c := New(filepath.Join(t.TempDir(), "session"))
 	c.HTTP.Transport = srv.Client().Transport
 	c.Base = srv.URL
-	err := c.Login(context.Background(), "username", "extremely-secret")
+	err := c.Login(t.Context(), "username", "extremely-secret")
 	if err == nil || strings.Contains(err.Error(), "secret") || strings.Contains(err.Error(), "username") {
 		t.Fatalf("unsafe auth error: %v", err)
 	}
 	c.HTTP.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) { return nil, &urlError{message: r.URL.String()} })
-	err = c.Login(context.Background(), "username", "extremely-secret")
+	err = c.Login(t.Context(), "username", "extremely-secret")
 	if err == nil || strings.Contains(err.Error(), "extremely-secret") {
 		t.Fatalf("unsafe network error: %v", err)
 	}
@@ -169,7 +168,7 @@ func TestLoginPreservesNumericAccountID(t *testing.T) {
 	}))
 	c := New(filepath.Join(t.TempDir(), "session.json"))
 	c.HTTP.Transport = srv.Client().Transport
-	if err := c.Login(context.Background(), "tester", "password"); err != nil {
+	if err := c.Login(t.Context(), "tester", "password"); err != nil {
 		t.Fatal(err)
 	}
 	if c.Session.UserID != "9007199254740993" {
@@ -197,7 +196,7 @@ func TestRPResponseJSONValidation(t *testing.T) {
 			}))
 			c := New("")
 			c.HTTP.Transport = srv.Client().Transport
-			err := c.Login(context.Background(), "tester", "private-password")
+			err := c.Login(t.Context(), "tester", "private-password")
 			if err == nil || err.Error() != "invalid Radio Paradise response" {
 				t.Fatalf("expected sanitized JSON error, got %v", err)
 			}
@@ -226,7 +225,7 @@ func TestPublicPlaylistAndMalformedResponses(t *testing.T) {
 	c := New("")
 	c.HTTP.Transport = srv.Client().Transport
 	c.Base = srv.URL
-	songs, err := c.Playlist(context.Background(), 0)
+	songs, err := c.Playlist(t.Context(), 0)
 	if err != nil || songs[0].UserRating != 0 || songs[0].ListenerRating != 8.2 {
 		t.Fatalf("public metadata: %+v %v", songs, err)
 	}
@@ -241,7 +240,7 @@ func TestLivePublicRP(t *testing.T) {
 		t.Skip("set RP_LIVE_TEST=1 for public RP API smoke test")
 	}
 	c := New("")
-	songs, err := c.Playlist(context.Background(), 0)
+	songs, err := c.Playlist(t.Context(), 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -253,7 +252,7 @@ func TestLivePublicRP(t *testing.T) {
 
 func TestCommentsRequireAccount(t *testing.T) {
 	c := New("")
-	_, err := c.Comments(context.Background(), 42, 0)
+	_, err := c.Comments(t.Context(), 42, 0)
 	if !errors.Is(err, ErrCommentsAuth) {
 		t.Fatalf("expected sign-in prompt, got %v", err)
 	}

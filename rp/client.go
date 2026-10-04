@@ -16,7 +16,7 @@ import (
 	"strings"
 	"time"
 
-	"omarchy-sonos/internal/storage"
+	"omarchy-sonos/storage"
 )
 
 type Session struct {
@@ -67,7 +67,16 @@ var preserveNumbers = json.WithUnmarshalers(json.UnmarshalFromFunc(func(dec *jso
 }))
 
 func New(path string) *Client {
-	return &Client{HTTP: &http.Client{Timeout: 8 * time.Second, CheckRedirect: func(req *http.Request, via []*http.Request) error { return http.ErrUseLastResponse }}, Base: "https://api.radioparadise.com", SessionPath: path}
+	return &Client{
+		HTTP: &http.Client{
+			Timeout: 8 * time.Second,
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+		},
+		Base:        "https://api.radioparadise.com",
+		SessionPath: path,
+	}
 }
 func (c *Client) Authenticated() bool { return c.Session.PasswordToken != "" && c.Session.UserID != "" }
 func (c *Client) Load() error         { return storage.Load(c.SessionPath, &c.Session) }
@@ -78,7 +87,13 @@ func (c *Client) request(ctx context.Context, path string, params url.Values, ou
 	}
 	req.Header.Set("User-Agent", "omarchy-sonos/0.1")
 	if c.Authenticated() {
-		for _, cookie := range []*http.Cookie{{Name: "player_id", Value: "omarchy-sonos"}, {Name: "C_username", Value: c.Session.Username}, {Name: "C_passwd", Value: c.Session.PasswordToken}, {Name: "C_validated", Value: "yes"}, {Name: "C_user_id", Value: c.Session.UserID}} {
+		for _, cookie := range []*http.Cookie{
+			{Name: "player_id", Value: "omarchy-sonos"},
+			{Name: "C_username", Value: c.Session.Username},
+			{Name: "C_passwd", Value: c.Session.PasswordToken},
+			{Name: "C_validated", Value: "yes"},
+			{Name: "C_user_id", Value: c.Session.UserID},
+		} {
 			req.AddCookie(cookie)
 		}
 	}
@@ -189,7 +204,17 @@ func (c *Client) Playlist(ctx context.Context, channel int) ([]Song, error) {
 				rating = int(num(raw["rating"]))
 			}
 		}
-		songs = append(songs, Song{ID: int64(num(raw["song_id"])), Title: html.UnescapeString(str(raw["title"])), Artist: html.UnescapeString(str(raw["artist"])), Album: html.UnescapeString(str(raw["album"])), Year: str(raw["year"]), Cover: coverURL(first(raw, "cover_large", "cover", "cover_med"), result.ImageBase), ListenerRating: num(raw["listener_rating"]), RatingsCount: int(num(raw["ratings_num"])), UserRating: rating})
+		songs = append(songs, Song{
+			ID:             int64(num(raw["song_id"])),
+			Title:          html.UnescapeString(str(raw["title"])),
+			Artist:         html.UnescapeString(str(raw["artist"])),
+			Album:          html.UnescapeString(str(raw["album"])),
+			Year:           str(raw["year"]),
+			Cover:          coverURL(first(raw, "cover_large", "cover", "cover_med"), result.ImageBase),
+			ListenerRating: num(raw["listener_rating"]),
+			RatingsCount:   int(num(raw["ratings_num"])),
+			UserRating:     rating,
+		})
 	}
 	return songs, nil
 }

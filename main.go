@@ -8,8 +8,6 @@ import (
 	"os/signal"
 	"path/filepath"
 	"syscall"
-
-	"omarchy-sonos/internal/app"
 )
 
 func main() {
@@ -26,7 +24,7 @@ func main() {
 	hosts := flag.String("hosts", os.Getenv("SONOS_HOSTS"), "comma-separated speaker IPs (optional discovery seeds)")
 	once := flag.Bool("once", false, "emit a read-only snapshot and exit")
 	flag.Parse()
-	a, err := app.New(*dir, app.ParseHosts(*hosts))
+	a, err := newApp(*dir, parseHosts(*hosts))
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)

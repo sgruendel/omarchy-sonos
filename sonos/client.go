@@ -3,14 +3,16 @@ package sonos
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/xml"
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/url"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -143,17 +145,11 @@ func (c *Client) Call(ctx context.Context, s Speaker, service, action string, ar
 	}
 	var body strings.Builder
 	body.WriteString(`<?xml version="1.0"?><s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/" s:encodingStyle="http://schemas.xmlsoap.org/soap/encoding/"><s:Body><u:` + action + ` xmlns:u="` + escape(svc.Type) + `">`)
-	keys := make([]string, 0, len(args))
-	for k := range args {
-		keys = append(keys, k)
-	}
+	keys := slices.Collect(maps.Keys(args))
 	// UPnP arguments follow the order in the service action declaration.
 	order := map[string]int{"InstanceID": 1, "Channel": 2, "Speed": 3, "DesiredVolume": 4, "DesiredMute": 4}
-	sort.Slice(keys, func(i, j int) bool {
-		if order[keys[i]] == order[keys[j]] {
-			return keys[i] < keys[j]
-		}
-		return order[keys[i]] < order[keys[j]]
+	slices.SortFunc(keys, func(a, b string) int {
+		return cmp.Or(cmp.Compare(order[a], order[b]), cmp.Compare(a, b))
 	})
 	for _, k := range keys {
 		body.WriteString("<" + k + ">" + escape(args[k]) + "</" + k + ">")
@@ -222,7 +218,7 @@ func (c *Client) Topology(ctx context.Context, s Speaker) ([]Speaker, error) {
 	if len(out) == 0 {
 		return nil, errors.New("Sonos topology contains no reachable rooms")
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	slices.SortFunc(out, func(a, b Speaker) int { return cmp.Compare(a.Name, b.Name) })
 	return out, nil
 }
 func seconds(s string) int {

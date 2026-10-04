@@ -1,5 +1,4 @@
-// Package app owns serialized speaker/account mutations and the JSON Lines protocol.
-package app
+package main
 
 import (
 	"bufio"
@@ -15,9 +14,9 @@ import (
 	"strings"
 	"time"
 
-	"omarchy-sonos/internal/rp"
-	"omarchy-sonos/internal/sonos"
-	"omarchy-sonos/internal/storage"
+	"omarchy-sonos/rp"
+	"omarchy-sonos/sonos"
+	"omarchy-sonos/storage"
 )
 
 type State struct {
@@ -83,8 +82,14 @@ type App struct {
 	ratings         map[int64]int
 }
 
-func New(dir string, hosts []string) (*App, error) {
-	a := &App{Sonos: sonos.New(), RP: rp.New(filepath.Join(dir, "rp-session.json")), StatePath: filepath.Join(dir, "state.json"), playlistChannel: -1, ratings: map[int64]int{}}
+func newApp(dir string, hosts []string) (*App, error) {
+	a := &App{
+		Sonos:           sonos.New(),
+		RP:              rp.New(filepath.Join(dir, "rp-session.json")),
+		StatePath:       filepath.Join(dir, "state.json"),
+		playlistChannel: -1,
+		ratings:         map[int64]int{},
+	}
 	if err := storage.Load(a.StatePath, &a.State); err != nil {
 		return nil, fmt.Errorf("could not load speaker state: %w", err)
 	}
@@ -102,7 +107,17 @@ func New(dir string, hosts []string) (*App, error) {
 	if err := a.RP.Load(); err != nil {
 		return nil, errors.New("could not load RP session")
 	}
-	a.Snapshot = Snapshot{Type: "snapshot", Version: 1, Status: "starting", Rooms: []sonos.Speaker{}, RP: RadioParadise{Channel: -1, Override: -1, Comments: rp.Comments{Items: []rp.Comment{}}}}
+	a.Snapshot = Snapshot{
+		Type:    "snapshot",
+		Version: 1,
+		Status:  "starting",
+		Rooms:   []sonos.Speaker{},
+		RP: RadioParadise{
+			Channel:  -1,
+			Override: -1,
+			Comments: rp.Comments{Items: []rp.Comment{}},
+		},
+	}
 	return a, nil
 }
 func (a *App) save() error { return storage.Save(a.StatePath, a.State) }
@@ -431,7 +446,7 @@ func (a *App) Run(ctx context.Context, in io.Reader, out io.Writer, once bool) e
 		scanner := bufio.NewScanner(in)
 		scanner.Buffer(make([]byte, 4096), 64<<10)
 		for scanner.Scan() {
-			line := append([]byte(nil), scanner.Bytes()...)
+			line := slices.Clone(scanner.Bytes())
 			select {
 			case lines <- input{line: line}:
 			case <-ctx.Done():
@@ -489,8 +504,8 @@ func (a *App) Run(ctx context.Context, in io.Reader, out io.Writer, once bool) e
 	}
 }
 
-// ParseHosts accepts comma-separated local IPs, never URLs or credentials.
-func ParseHosts(value string) []string {
+// parseHosts accepts comma-separated local IPs, never URLs or credentials.
+func parseHosts(value string) []string {
 	var hosts []string
 	for _, h := range strings.Split(value, ",") {
 		if h = strings.TrimSpace(h); h != "" {

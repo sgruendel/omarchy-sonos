@@ -1,9 +1,8 @@
-package app
+package main
 
 import (
 	"bufio"
 	"bytes"
-	"context"
 	"encoding/json/v2"
 	"encoding/xml"
 	"io"
@@ -13,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"omarchy-sonos/internal/rp"
-	"omarchy-sonos/internal/sonos"
+	"omarchy-sonos/rp"
+	"omarchy-sonos/sonos"
 )
 
 type transportFunc func(*http.Request) (*http.Response, error)
@@ -32,7 +31,7 @@ func xmlEscape(value string) string {
 // All IO in these app tests is in-memory, including forced discovery and RP calls.
 func fixture(t *testing.T) (*App, *int, *string, *bool) {
 	t.Helper()
-	a, err := New(t.TempDir(), []string{"192.168.1.3"})
+	a, err := newApp(t.TempDir(), []string{"192.168.1.3"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,7 +90,7 @@ func fixture(t *testing.T) (*App, *int, *string, *bool) {
 			return response(`{}`), nil
 		}
 	})}
-	a.Refresh(context.Background(), true)
+	a.Refresh(t.Context(), true)
 	if a.Snapshot.Status != "ready" || a.Snapshot.RP.Song == nil {
 		t.Fatalf("fixture failed: %+v", a.Snapshot)
 	}
@@ -112,12 +111,12 @@ func TestRatingRevalidatesSongAndRoom(t *testing.T) {
 			case "changed during metadata":
 				*transition = true
 			}
-			err := a.Execute(context.Background(), cmd)
+			err := a.Execute(t.Context(), cmd)
 			if scenario == "current" {
 				if err != nil || *submissions != 1 {
 					t.Fatalf("rating: %v, submissions %d", err, *submissions)
 				}
-				a.Refresh(context.Background(), false)
+				a.Refresh(t.Context(), false)
 				if a.Snapshot.RP.Song.UserRating != 10 {
 					t.Fatal("personal rating not updated")
 				}
@@ -133,12 +132,12 @@ func TestFailedMetadataAndNonRPPlaybackClearRating(t *testing.T) {
 	a, _, _, _ := fixture(t)
 	a.lastPlaylist = time.Time{}
 	a.RP.HTTP = &http.Client{Transport: transportFunc(func(r *http.Request) (*http.Response, error) { return response("broken-json"), nil })}
-	a.Refresh(context.Background(), false)
+	a.Refresh(t.Context(), false)
 	if a.Snapshot.RP.Song != nil || a.Snapshot.RP.CanRate || a.Snapshot.RP.Error == "" {
 		t.Fatal("failed request left stale rating enabled")
 	}
 	a.Snapshot.Playback = sonos.Playback{URI: "https://other.example/radio", Station: "Other station"}
-	a.refreshRP(context.Background())
+	a.refreshRP(t.Context())
 	if a.Snapshot.RP.Detected || a.Snapshot.RP.Song != nil {
 		t.Fatal("non-RP source kept RP data")
 	}
@@ -147,7 +146,7 @@ func TestJSONProtocolAndCredentialPrivacy(t *testing.T) {
 	a, submissions, _, _ := fixture(t)
 	var out bytes.Buffer
 	commands := strings.NewReader("{broken}\n" + `{"id":"next","op":"next"}` + "\n" + `{"id":"volume","op":"setVolume","volume":101}` + "\n" + `{"id":"duplicate","op":"rpRate","room":"RINCON_A","songId":42,"rating":1,"rating":10}` + "\n")
-	if err := a.Run(context.Background(), commands, &out, false); err != nil {
+	if err := a.Run(t.Context(), commands, &out, false); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(out.String(), "private-secret") {
@@ -185,15 +184,15 @@ func TestJSONProtocolAndCredentialPrivacy(t *testing.T) {
 func TestStateDefaultsAndOverrides(t *testing.T) {
 	a, _, _, _ := fixture(t)
 	channel := 1
-	if err := a.Execute(context.Background(), Command{Op: "rpChannel", Channel: &channel}); err != nil {
+	if err := a.Execute(t.Context(), Command{Op: "rpChannel", Channel: &channel}); err != nil {
 		t.Fatal(err)
 	}
-	restored, err := New(filepath.Dir(a.StatePath), nil)
+	restored, err := newApp(filepath.Dir(a.StatePath), nil)
 	if err != nil || restored.State.Channels["RINCON_A"] != 1 || restored.State.Selected != "RINCON_A" {
 		t.Fatal("room settings not persisted")
 	}
 	channel = -1
-	if err = a.Execute(context.Background(), Command{Op: "rpChannel", Channel: &channel}); err != nil {
+	if err = a.Execute(t.Context(), Command{Op: "rpChannel", Channel: &channel}); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := a.State.Channels["RINCON_A"]; ok {
@@ -205,17 +204,17 @@ func TestCommentsAppendAndResetOnSongChange(t *testing.T) {
 	a, _, title, _ := fixture(t)
 	a.Snapshot.RP.Comments.More = true
 	a.Snapshot.RP.Comments.Offset = 20
-	if err := a.Execute(context.Background(), Command{Op: "rpComments", SongID: 42, Offset: 20}); err != nil {
+	if err := a.Execute(t.Context(), Command{Op: "rpComments", SongID: 42, Offset: 20}); err != nil {
 		t.Fatal(err)
 	}
 	if len(a.Snapshot.RP.Comments.Items) != 2 {
 		t.Fatal("page did not append")
 	}
-	if err := a.Execute(context.Background(), Command{Op: "rpComments", SongID: 43, Offset: 0}); err == nil {
+	if err := a.Execute(t.Context(), Command{Op: "rpComments", SongID: 43, Offset: 0}); err == nil {
 		t.Fatal("accepted comments for a stale song")
 	}
 	*title = "New Track"
-	a.Refresh(context.Background(), false)
+	a.Refresh(t.Context(), false)
 	if a.Snapshot.RP.Song.ID != 43 || len(a.Snapshot.RP.Comments.Items) != 1 {
 		t.Fatal("comments did not reset on song transition")
 	}
@@ -251,8 +250,8 @@ func TestGroupedRoomUsesCoordinatorForPlaybackAndRoomForVolume(t *testing.T) {
 		}
 		return base.RoundTrip(r)
 	})
-	a.Refresh(context.Background(), false)
-	if err := a.Execute(context.Background(), Command{Op: "adjustVolume", Delta: 5}); err != nil {
+	a.Refresh(t.Context(), false)
+	if err := a.Execute(t.Context(), Command{Op: "adjustVolume", Delta: 5}); err != nil {
 		t.Fatal(err)
 	}
 	if volumeCalls != 5 {
@@ -263,10 +262,10 @@ func TestGroupedRoomUsesCoordinatorForPlaybackAndRoomForVolume(t *testing.T) {
 func TestSigningOutClearsCommentsAndPersonalRating(t *testing.T) {
 	a, _, _, _ := fixture(t)
 	a.ratings[42] = 10
-	if err := a.Execute(context.Background(), Command{Op: "rpLogout"}); err != nil {
+	if err := a.Execute(t.Context(), Command{Op: "rpLogout"}); err != nil {
 		t.Fatal(err)
 	}
-	a.Refresh(context.Background(), false)
+	a.Refresh(t.Context(), false)
 	if a.Snapshot.Account.Authenticated || a.Snapshot.RP.CanRate || a.Snapshot.RP.Song.UserRating != 0 || len(a.Snapshot.RP.Comments.Items) != 0 || a.Snapshot.RP.CommentsError == "" || len(a.ratings) != 0 {
 		t.Fatal("account data remained after logout")
 	}
@@ -277,7 +276,7 @@ func TestNativeSonosRPTrackURLEnablesRatingsWithoutOverride(t *testing.T) {
 	a.Snapshot.Playback.URI = "x-sonosapi-radio:channel%3a0%3a4%3aresume?sid=308&sn=1"
 	a.Snapshot.Playback.TrackURI = "https://audio.radioparadise.stream/audio/blocks/0/x/1019/4/g/1019-4.flac"
 	a.Snapshot.Playback.Station = "The Main Mix"
-	a.refreshRP(context.Background())
+	a.refreshRP(t.Context())
 	if !a.Snapshot.RP.Detected || a.Snapshot.RP.Channel != 0 || a.Snapshot.RP.Song == nil || !a.Snapshot.RP.CanRate {
 		t.Fatalf("native RP source did not enable rating: %+v", a.Snapshot.RP)
 	}

@@ -14,7 +14,7 @@ var Channels = map[int]string{0: "Main Mix", 1: "Mellow Mix", 2: "RockIt!", 3: "
 // Detect recognizes RP stream hosts or RP station labels; unknown mixes remain unknown.
 func Detect(uri, station string) (bool, int) {
 	decoded := html.UnescapeString(uri)
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		v, err := url.QueryUnescape(decoded)
 		if err != nil || v == decoded {
 			break

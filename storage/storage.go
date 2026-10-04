@@ -1,3 +1,4 @@
+// Package storage persists private JSON state with atomic replacement.
 package storage
 
 import (

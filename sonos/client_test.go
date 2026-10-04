@@ -1,7 +1,6 @@
 package sonos
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"net"
@@ -60,7 +59,7 @@ func TestSOAPTopologyPlaybackAndControls(t *testing.T) {
 	c := New()
 	c.HTTP.Transport = srv.Client().Transport
 	serverURL = srv.URL
-	ctx := context.Background()
+	ctx := t.Context()
 	speaker, err := c.Describe(ctx, srv.URL+"/description")
 	if err != nil {
 		t.Fatal(err)
@@ -100,7 +99,7 @@ func TestSOAPFaultAndSSDPValidation(t *testing.T) {
 	}))
 	c := New()
 	c.HTTP.Transport = srv.Client().Transport
-	_, err := c.Call(context.Background(), Speaker{URL: srv.URL, Services: map[string]Service{"AVTransport": {Type: "urn:AVTransport:1", Control: "/"}}}, "AVTransport", "Pause", nil)
+	_, err := c.Call(t.Context(), Speaker{URL: srv.URL, Services: map[string]Service{"AVTransport": {Type: "urn:AVTransport:1", Control: "/"}}}, "AVTransport", "Pause", nil)
 	if err == nil || !strings.Contains(err.Error(), "701") {
 		t.Fatalf("fault: %v", err)
 	}
