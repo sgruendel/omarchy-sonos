@@ -16,7 +16,7 @@ func TestSOAPTopologyPlaybackAndControls(t *testing.T) {
 	volume := "17"
 	mute := "0"
 	state := "PLAYING"
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == "GET" {
 			fmt.Fprintf(w, `<root><device><friendlyName>Living Room</friendlyName><UDN>uuid:RINCON_A</UDN><serviceList><service><serviceType>urn:schemas-upnp-org:service:ZoneGroupTopology:1</serviceType><controlURL>/topology</controlURL></service></serviceList><deviceList><device><serviceList><service><serviceType>urn:schemas-upnp-org:service:AVTransport:1</serviceType><controlURL>/transport</controlURL></service><service><serviceType>urn:schemas-upnp-org:service:RenderingControl:1</serviceType><controlURL>/rendering</controlURL></service></serviceList></device></deviceList></device></root>`)
 			return
@@ -57,9 +57,9 @@ func TestSOAPTopologyPlaybackAndControls(t *testing.T) {
 		}
 		fmt.Fprintf(w, `<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><Response>%s</Response></s:Body></s:Envelope>`, payload)
 	}))
-	defer srv.Close()
-	serverURL = srv.URL
 	c := New()
+	c.HTTP.Transport = srv.Client().Transport
+	serverURL = srv.URL
 	ctx := context.Background()
 	speaker, err := c.Describe(ctx, srv.URL+"/description")
 	if err != nil {
@@ -94,12 +94,13 @@ func TestSOAPTopologyPlaybackAndControls(t *testing.T) {
 	}
 }
 func TestSOAPFaultAndSSDPValidation(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(500)
 		_, _ = w.Write([]byte(`<Envelope><Body><Fault><errorCode>701</errorCode><errorDescription>Transition not available</errorDescription></Fault></Body></Envelope>`))
 	}))
-	defer srv.Close()
-	_, err := New().Call(context.Background(), Speaker{URL: srv.URL, Services: map[string]Service{"AVTransport": {Type: "urn:AVTransport:1", Control: "/"}}}, "AVTransport", "Pause", nil)
+	c := New()
+	c.HTTP.Transport = srv.Client().Transport
+	_, err := c.Call(context.Background(), Speaker{URL: srv.URL, Services: map[string]Service{"AVTransport": {Type: "urn:AVTransport:1", Control: "/"}}}, "AVTransport", "Pause", nil)
 	if err == nil || !strings.Contains(err.Error(), "701") {
 		t.Fatalf("fault: %v", err)
 	}

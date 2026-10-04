@@ -55,7 +55,7 @@ func TestDetectionAndMatching(t *testing.T) {
 func TestAccountMetadataCommentsAndRating(t *testing.T) {
 	ctx := context.Background()
 	ratings := 0
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.URL.Path != "/api/auth" {
 			for name, want := range map[string]string{"C_username": "tester", "C_passwd": "secret-token", "C_user_id": "123", "C_validated": "yes"} {
@@ -88,9 +88,9 @@ func TestAccountMetadataCommentsAndRating(t *testing.T) {
 			http.NotFound(w, r)
 		}
 	}))
-	defer srv.Close()
 	path := filepath.Join(t.TempDir(), "private", "rp-session.json")
 	c := New(path)
+	c.HTTP.Transport = srv.Client().Transport
 	c.Base = srv.URL
 	if err := c.Rate(ctx, 42, 10); err == nil {
 		t.Fatal("unauthenticated rating accepted")
@@ -107,6 +107,7 @@ func TestAccountMetadataCommentsAndRating(t *testing.T) {
 		t.Fatal("session is not private")
 	}
 	restored := New(path)
+	restored.HTTP.Transport = srv.Client().Transport
 	restored.Base = srv.URL
 	if err := restored.Load(); err != nil || !restored.Authenticated() {
 		t.Fatal("session did not restore")
@@ -145,11 +146,11 @@ func TestAccountMetadataCommentsAndRating(t *testing.T) {
 	}
 }
 func TestErrorsNeverExposePasswordOrToken(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "https://example.com/?password=secret", 302)
 	}))
-	defer srv.Close()
 	c := New(filepath.Join(t.TempDir(), "session"))
+	c.HTTP.Transport = srv.Client().Transport
 	c.Base = srv.URL
 	err := c.Login(context.Background(), "username", "extremely-secret")
 	if err == nil || strings.Contains(err.Error(), "secret") || strings.Contains(err.Error(), "username") {
@@ -162,6 +163,51 @@ func TestErrorsNeverExposePasswordOrToken(t *testing.T) {
 	}
 }
 
+func TestLoginPreservesNumericAccountID(t *testing.T) {
+	srv := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"status":"success","username":"tester","passwd":"token","user_id":9007199254740993}`))
+	}))
+	c := New(filepath.Join(t.TempDir(), "session.json"))
+	c.HTTP.Transport = srv.Client().Transport
+	if err := c.Login(context.Background(), "tester", "password"); err != nil {
+		t.Fatal(err)
+	}
+	if c.Session.UserID != "9007199254740993" {
+		t.Fatalf("account ID lost precision: %s", c.Session.UserID)
+	}
+	restored := New(c.SessionPath)
+	if err := restored.Load(); err != nil || restored.Session != c.Session {
+		t.Fatalf("session did not round-trip: %v", err)
+	}
+}
+
+func TestRPResponseJSONValidation(t *testing.T) {
+	for _, tt := range []struct {
+		name, body string
+	}{
+		{"duplicate member", `{"status":"success","status":"failure"}`},
+		{"escaped duplicate member", `{"status":"success","\u0073tatus":"failure"}`},
+		{"invalid UTF-8", "{\"status\":\"\xff\"}"},
+		{"trailing garbage", `{"status":"success"}garbage`},
+		{"multiple values", `{"status":"success"}{"status":"failure"}`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = w.Write([]byte(tt.body))
+			}))
+			c := New("")
+			c.HTTP.Transport = srv.Client().Transport
+			err := c.Login(context.Background(), "tester", "private-password")
+			if err == nil || err.Error() != "invalid Radio Paradise response" {
+				t.Fatalf("expected sanitized JSON error, got %v", err)
+			}
+			if c.Authenticated() {
+				t.Fatal("invalid response authenticated account")
+			}
+		})
+	}
+}
+
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
@@ -171,14 +217,14 @@ type urlError struct{ message string }
 func (e *urlError) Error() string { return e.message }
 
 func TestPublicPlaylistAndMalformedResponses(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Cookie") != "" {
 			t.Error("sent cookies without account")
 		}
 		_, _ = w.Write([]byte(`{"song":[{"song_id":"1","artist":"A","title":"T","listener_rating":"8.2","rating":null}]}`))
 	}))
-	defer srv.Close()
 	c := New("")
+	c.HTTP.Transport = srv.Client().Transport
 	c.Base = srv.URL
 	songs, err := c.Playlist(context.Background(), 0)
 	if err != nil || songs[0].UserRating != 0 || songs[0].ListenerRating != 8.2 {

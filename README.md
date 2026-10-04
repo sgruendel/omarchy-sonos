@@ -12,9 +12,12 @@ this plugin does not run a second RP player.
 
 ## Build and install
 
-Requires Go 1.24+, Bash, an Omarchy Quattro shell with its plugin API, and Sonos
+Requires Go 1.27+, Bash, an Omarchy Quattro shell with its plugin API, and Sonos
 speakers reachable on your LAN. There are no Go module dependencies, Python
 packages, Sonos cloud credentials, or runtime downloads.
+
+The backend uses Go's `encoding/json/v2` and `encoding/json/jsontext` packages,
+enabled by default in Go 1.27; no `GOEXPERIMENT` setting is needed.
 
 ```sh
 git clone https://github.com/sgruendel/omarchy-sonos.git

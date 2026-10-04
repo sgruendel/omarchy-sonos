@@ -1,7 +1,8 @@
 package storage
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"os"
 	"path/filepath"
 )
@@ -11,7 +12,7 @@ func Save(path string, value any) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return err
 	}
-	data, err := json.MarshalIndent(value, "", "  ")
+	data, err := json.Marshal(value, jsontext.WithIndent("  "), json.Deterministic(true))
 	if err != nil {
 		return err
 	}

@@ -4,7 +4,8 @@ package app
 import (
 	"bufio"
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"io"
@@ -403,8 +404,8 @@ func (a *App) Execute(ctx context.Context, c Command) error {
 
 // Run serializes all commands and snapshots; EOF terminates the owned backend process.
 func (a *App) Run(ctx context.Context, in io.Reader, out io.Writer, once bool) error {
-	enc := json.NewEncoder(out)
-	emit := func() error { return enc.Encode(a.Snapshot) }
+	enc := jsontext.NewEncoder(out)
+	emit := func() error { return json.MarshalEncode(enc, a.Snapshot) }
 	refresh := func(force bool) {
 		requestCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
 		defer cancel()
@@ -470,7 +471,7 @@ func (a *App) Run(ctx context.Context, in io.Reader, out io.Writer, once bool) e
 			if err != nil {
 				result["error"] = err.Error()
 			}
-			if e := enc.Encode(result); e != nil {
+			if e := json.MarshalEncode(enc, result); e != nil {
 				return e
 			}
 			if err == nil && c.Op != "refresh" {

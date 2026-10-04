@@ -2,7 +2,8 @@ package rp
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"errors"
 	"fmt"
 	"html"
@@ -56,6 +57,15 @@ type Client struct {
 
 var ErrCommentsAuth = errors.New("Sign in to Radio Paradise to read song comments")
 
+// RP mixes strings and numbers. Preserve numeric text in interface fields,
+// especially account IDs, instead of rounding it through float64.
+var preserveNumbers = json.WithUnmarshalers(json.UnmarshalFromFunc(func(dec *jsontext.Decoder, value *any) error {
+	if dec.PeekKind() == '0' {
+		*value = jsontext.Value(nil)
+	}
+	return errors.ErrUnsupported
+}))
+
 func New(path string) *Client {
 	return &Client{HTTP: &http.Client{Timeout: 8 * time.Second, CheckRedirect: func(req *http.Request, via []*http.Request) error { return http.ErrUseLastResponse }}, Base: "https://api.radioparadise.com", SessionPath: path}
 }
@@ -83,9 +93,7 @@ func (c *Client) request(ctx context.Context, path string, params url.Values, ou
 		}
 		return fmt.Errorf("Radio Paradise returned HTTP %d", resp.StatusCode)
 	}
-	d := json.NewDecoder(io.LimitReader(resp.Body, 4<<20))
-	d.UseNumber()
-	if err = d.Decode(out); err != nil {
+	if err = json.UnmarshalRead(io.LimitReader(resp.Body, 4<<20), out, preserveNumbers); err != nil {
 		return errors.New("invalid Radio Paradise response")
 	}
 	return nil

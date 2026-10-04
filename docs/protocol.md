@@ -4,6 +4,9 @@ One JSON object per line, maximum input line size 64 KiB. The backend serializes
 commands and polling. EOF, SIGINT, or SIGTERM exits. The QML service owns one
 backend shared by all widget instances.
 
+JSON uses UTF-8 and unique object member names. Command fields are case-sensitive;
+invalid UTF-8 or duplicate members produce an `invalid command JSON` result.
+
 Every command has a string `id` and an `op`. Results are
 `{"type":"result","id":"1","ok":true}` or include `ok:false` and `error`.
 A snapshot follows every command, including errors. Snapshots have `version:1`,

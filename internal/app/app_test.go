@@ -1,9 +1,10 @@
 package app
 
 import (
+	"bufio"
 	"bytes"
 	"context"
-	"encoding/json"
+	"encoding/json/v2"
 	"encoding/xml"
 	"io"
 	"net/http"
@@ -143,25 +144,23 @@ func TestFailedMetadataAndNonRPPlaybackClearRating(t *testing.T) {
 	}
 }
 func TestJSONProtocolAndCredentialPrivacy(t *testing.T) {
-	a, _, _, _ := fixture(t)
+	a, submissions, _, _ := fixture(t)
 	var out bytes.Buffer
-	commands := strings.NewReader("{broken}\n" + `{"id":"next","op":"next"}` + "\n" + `{"id":"volume","op":"setVolume","volume":101}` + "\n")
+	commands := strings.NewReader("{broken}\n" + `{"id":"next","op":"next"}` + "\n" + `{"id":"volume","op":"setVolume","volume":101}` + "\n" + `{"id":"duplicate","op":"rpRate","room":"RINCON_A","songId":42,"rating":1,"rating":10}` + "\n")
 	if err := a.Run(context.Background(), commands, &out, false); err != nil {
 		t.Fatal(err)
 	}
 	if strings.Contains(out.String(), "private-secret") {
 		t.Fatal("token leaked in protocol")
 	}
-	decoder := json.NewDecoder(&out)
+	// Decode each line separately, as the QML service does.
+	scanner := bufio.NewScanner(&out)
+	scanner.Buffer(make([]byte, 4096), 4<<20)
 	results := 0
 	snapshots := 0
-	for {
+	for scanner.Scan() {
 		var message map[string]any
-		err := decoder.Decode(&message)
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
+		if err := json.Unmarshal(scanner.Bytes(), &message); err != nil {
 			t.Fatal(err)
 		}
 		if message["type"] == "result" {
@@ -173,8 +172,14 @@ func TestJSONProtocolAndCredentialPrivacy(t *testing.T) {
 			snapshots++
 		}
 	}
-	if results != 3 || snapshots != 5 {
+	if err := scanner.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if results != 4 || snapshots != 6 {
 		t.Fatalf("records: %d results, %d snapshots", results, snapshots)
+	}
+	if *submissions != 0 {
+		t.Fatal("command with duplicate rating fields submitted a rating")
 	}
 }
 func TestStateDefaultsAndOverrides(t *testing.T) {
