@@ -100,7 +100,8 @@ BarWidget {
           spacing: Style.space(12)
           DetailText { text: "Sonos Paradise"; font.bold: true; font.pixelSize: Style.font.body * 1.25 }
           DetailText { visible: !root.ready; text: root.snap.error || (root.snap.status === "starting" ? "Looking for speakers…" : "No reachable Sonos speakers") }
-          DetailText { visible: text !== ""; text: (root.service ? root.service.lastError : "") || root.snap.error || (root.service ? root.service.lastDiagnostic : "") || ""; color: Color.accent }
+          DetailText { visible: text !== ""; text: (root.service ? root.service.lastError : "") || (root.ready ? root.snap.error : "") || ""; color: Color.accent }
+          DetailText { visible: text !== ""; text: root.service ? root.service.lastDiagnostic : ""; color: Color.accent }
           Row {
             spacing: Style.space(8)
             ActionButton { text: "Refresh"; enabled: !root.busy; onClicked: root.send("refresh") }
