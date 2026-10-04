@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "id": "sgruendel.sonos",
+  "name": "Sonos Paradise",
+  "version": "0.1.0",
+  "license": "MIT",
+  "description": "Go Sonos controller with Radio Paradise artwork, ratings, comments and account support",
+  "kinds": ["service", "bar-widget"],
+  "entryPoints": {"service": "Service.qml", "barWidget": "Widget.qml"},
+  "barWidget": {
+    "displayName": "Sonos Paradise",
+    "description": "Sonos playback and Radio Paradise song details",
+    "category": "Media",
+    "defaultSection": "right",
+    "allowMultiple": false,
+    "defaults": {"maxLabelWidth": 220},
+    "schema": [{"key": "maxLabelWidth", "type": "integer", "label": "Maximum label width", "min": 80, "max": 500, "step": 20, "defaultValue": 220}]
+  }
+}
