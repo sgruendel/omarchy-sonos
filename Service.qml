@@ -28,7 +28,6 @@ Item {
     pending = next
     busy = true
     lastError = ""
-    lastDiagnostic = ""
     backend.write(JSON.stringify(payload) + "\n")
   }
   function receive(line) {

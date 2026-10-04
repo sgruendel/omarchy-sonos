@@ -5,6 +5,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -80,14 +81,25 @@ func TestExplicitZeroAndFalseCommands(t *testing.T) {
 
 func TestVolumeDeltaClampsWithoutOverflow(t *testing.T) {
 	for _, tt := range []struct {
-		delta int
-		want  string
-	}{{math.MaxInt, "100"}, {math.MinInt, "0"}} {
-		t.Run(tt.want, func(t *testing.T) {
+		name          string
+		volume, delta int
+		want          string
+	}{
+		{"maximum delta", 20, math.MaxInt, "100"},
+		{"minimum delta", 20, math.MinInt, "0"},
+		{"maximum reported volume plus positive delta", math.MaxInt, 1, "100"},
+		{"maximum reported volume plus negative delta", math.MaxInt, -5, "95"},
+		{"minimum reported volume plus negative delta", math.MinInt, -1, "0"},
+		{"minimum reported volume plus positive delta", math.MinInt, 5, "5"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
 			a, _, _, _ := fixture(t)
 			base := a.Sonos.HTTP.Transport
 			writes := 0
 			a.Sonos.HTTP.Transport = transportFunc(func(r *http.Request) (*http.Response, error) {
+				if strings.Contains(r.Header.Get("SOAPACTION"), "#GetVolume") {
+					return response("<Envelope><Body><Response><CurrentVolume>" + strconv.Itoa(tt.volume) + "</CurrentVolume></Response></Body></Envelope>"), nil
+				}
 				if strings.Contains(r.Header.Get("SOAPACTION"), "#SetVolume") {
 					writes++
 					body, err := io.ReadAll(r.Body)

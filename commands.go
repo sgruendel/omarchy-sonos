@@ -151,8 +151,10 @@ func (a *App) Execute(ctx context.Context, c Command) error {
 		if err != nil {
 			return err
 		}
-		// Clamp the delta before adding it to avoid integer overflow.
-		return a.Sonos.SetVolume(ctx, room, max(0, min(100, volume+max(-100, min(100, *c.Delta)))))
+		// Bound both operands before adding; reported volume is untrusted too.
+		volume = max(0, min(100, volume))
+		delta := max(-100, min(100, *c.Delta))
+		return a.Sonos.SetVolume(ctx, room, max(0, min(100, volume+delta)))
 	case "setMute":
 		return a.Sonos.SetMute(ctx, room, *c.Mute)
 	case "playPause", "next", "previous":
