@@ -1,5 +1,7 @@
 # Sonos Paradise
 
+[![build](https://github.com/sgruendel/omarchy-sonos/actions/workflows/build.yaml/badge.svg)](https://github.com/sgruendel/omarchy-sonos/actions/workflows/build.yaml)
+
 An Omarchy Quattro bar plugin with a dependency-free Go backend. Control local
 Sonos speakers and see Radio Paradise artwork, listener scores, your rating,
 and song comments. Sign in with your RP account to submit ratings from 1 to 10.
@@ -30,6 +32,12 @@ step: building and testing the checkout do not change your desktop.
 For a distributable plugin folder, run `make stage`. Its Go binary is built for
 the current OS/architecture; rebuild for other machines. The source checkout's
 `sonos-backend` launcher expects `bin/omarchy-sonos`, so build before enabling it.
+
+GitHub Actions checks formatting, runs race-enabled tests and `go vet`, and builds
+the Go backend on pushes to `main` and pull requests. Tags starting with `v` also
+publish Linux amd64 and arm64 plugin bundles with SHA-256 checksums to GitHub
+Releases. Manual workflow runs build downloadable development artifacts.
+Dependabot checks Go modules and GitHub Actions weekly.
 
 ## Use
 
