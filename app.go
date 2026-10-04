@@ -127,10 +127,7 @@ func (a *App) discover(ctx context.Context) error {
 			locations = append(locations, loc)
 		}
 	}
-	rooms := a.probeLocations(ctx, locations)
-	if len(rooms) == 0 && ctx.Err() == nil {
-		rooms = a.probeLocations(ctx, sonos.Discover(ctx, 3*time.Second))
-	}
+	rooms := a.discoverRooms(ctx, locations, sonos.Discover)
 	if len(rooms) == 0 {
 		return errors.New("no Sonos speakers found; check the LAN or configure SONOS_HOSTS")
 	}

@@ -42,6 +42,85 @@ func topologyProbeFixture(t *testing.T, reachable map[string][]string) *App {
 	return a
 }
 
+func TestDiscoveryProbesSSDPAfterPartialCachedTopology(t *testing.T) {
+	for _, tt := range []struct {
+		name      string
+		cached    []string
+		found     []string
+		locations []string
+		want      []string
+		wantSSDP  bool
+	}{
+		{"complete cache skips SSDP", []string{"A", "B", "C"}, []string{"B"}, nil, []string{"A", "B", "C"}, false},
+		{"complete SSDP replaces partial cache", []string{"A"}, []string{"A", "B", "C"}, []string{"http://192.168.1.3/found/description"}, []string{"A", "B", "C"}, true},
+		{"larger cached partial survives", []string{"A", "B"}, []string{"B"}, []string{"http://192.168.1.3/found/description"}, []string{"A", "B"}, true},
+		{"larger SSDP partial replaces cache", []string{"A"}, []string{"A", "B"}, []string{"http://192.168.1.3/found/description"}, []string{"A", "B"}, true},
+		{"partial tie prefers cache", []string{"A"}, []string{"B"}, []string{"http://192.168.1.3/found/description"}, []string{"A"}, true},
+		{"no SSDP replies preserves cache", []string{"A"}, nil, nil, []string{"A"}, true},
+		{"unreachable cache recovers through SSDP", nil, []string{"A", "B", "C"}, []string{"http://192.168.1.3/found/description"}, []string{"A", "B", "C"}, true},
+		{"no reachable rooms", nil, nil, []string{"http://192.168.1.3/found/description"}, nil, true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			a := topologyProbeFixture(t, map[string][]string{"cached": tt.cached, "found": tt.found})
+			calls := 0
+			rooms := a.discoverRooms(t.Context(), []string{"http://192.168.1.3/cached/description"}, func(ctx context.Context, window time.Duration) []string {
+				calls++
+				if ctx.Err() != nil || window != 3*time.Second {
+					t.Errorf("unexpected SSDP context/window: %v, %v", ctx.Err(), window)
+				}
+				return tt.locations
+			})
+			var got []string
+			for _, room := range rooms {
+				got = append(got, room.UID)
+			}
+			if !slices.Equal(got, tt.want) || (calls == 1) != tt.wantSSDP || calls > 1 {
+				t.Fatalf("discovery rooms=%v SSDP calls=%d, want rooms=%v SSDP=%v", got, calls, tt.want, tt.wantSSDP)
+			}
+		})
+	}
+}
+
+func TestDiscoveryPrefersCompleteSSDPOverLargerCachedPartial(t *testing.T) {
+	a := topologyProbeFixture(t, map[string][]string{"cached": {"A", "B"}, "found": {"B"}})
+	base := a.Sonos.HTTP.Transport
+	a.Sonos.HTTP.Transport = transportFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path == "/found/control" {
+			state := `<ZoneGroupState><ZoneGroups><ZoneGroup Coordinator="B"><ZoneGroupMember UUID="B" ZoneName="B" Location="http://192.168.1.3/found/B"/></ZoneGroup></ZoneGroups></ZoneGroupState>`
+			return response("<Envelope><Body><Response><ZoneGroupState>" + xmlEscape(state) + "</ZoneGroupState></Response></Body></Envelope>"), nil
+		}
+		return base.RoundTrip(r)
+	})
+	rooms := a.discoverRooms(t.Context(), []string{"http://192.168.1.3/cached/description"}, func(context.Context, time.Duration) []string {
+		return []string{"http://192.168.1.3/found/description"}
+	})
+	if len(rooms) != 1 || rooms[0].UID != "B" {
+		t.Fatalf("complete topology did not replace the larger cached partial: %+v", rooms)
+	}
+}
+
+func TestDiscoveryCancellationDiscardsCachedPartial(t *testing.T) {
+	for _, when := range []string{"before probing", "during SSDP"} {
+		t.Run(when, func(t *testing.T) {
+			a := topologyProbeFixture(t, map[string][]string{"cached": {"A"}})
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			if when == "before probing" {
+				cancel()
+			}
+			calls := 0
+			rooms := a.discoverRooms(ctx, []string{"http://192.168.1.3/cached/description"}, func(context.Context, time.Duration) []string {
+				calls++
+				cancel()
+				return nil
+			})
+			if len(rooms) != 0 || ctx.Err() == nil || (calls == 1) != (when == "during SSDP") {
+				t.Fatalf("canceled discovery rooms=%v SSDP calls=%d err=%v", rooms, calls, ctx.Err())
+			}
+		})
+	}
+}
+
 func TestProbeLocationsWaitsForCompleteTopology(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		a := topologyProbeFixture(t, map[string][]string{"fast": {"A"}, "slow": {"A", "B", "C"}})
@@ -59,7 +138,7 @@ func TestProbeLocationsWaitsForCompleteTopology(t *testing.T) {
 		})
 		ctx, cancel := context.WithCancel(t.Context())
 		defer cancel()
-		done := make(chan []sonos.Speaker, 1)
+		done := make(chan topologyResult, 1)
 		go func() {
 			done <- a.probeLocations(ctx, []string{
 				"http://192.168.1.3/fast/description",
@@ -69,14 +148,14 @@ func TestProbeLocationsWaitsForCompleteTopology(t *testing.T) {
 		// The fast partial probe has finished; the complete probe is still blocked.
 		synctest.Wait()
 		select {
-		case rooms := <-done:
-			t.Fatalf("discovery returned %d rooms before the complete probe finished", len(rooms))
+		case result := <-done:
+			t.Fatalf("discovery returned %d rooms before the complete probe finished", len(result.rooms))
 		default:
 		}
 		close(release)
-		rooms := <-done
-		if len(rooms) != 3 || rooms[1].UID != "B" || rooms[2].UID != "C" {
-			t.Fatalf("complete topology lost rooms: %+v", rooms)
+		result := <-done
+		if !result.complete || len(result.rooms) != 3 || result.rooms[1].UID != "B" || result.rooms[2].UID != "C" {
+			t.Fatalf("complete topology lost rooms: %+v", result)
 		}
 	})
 }
@@ -95,15 +174,15 @@ func TestProbeLocationsKeepsBestPartialTopology(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			a := topologyProbeFixture(t, map[string][]string{"first": tt.first, "second": tt.second})
-			rooms := a.probeLocations(t.Context(), []string{
+			result := a.probeLocations(t.Context(), []string{
 				"http://192.168.1.3/first/description",
 				"http://192.168.1.3/second/description",
 			})
 			var got []string
-			for _, room := range rooms {
+			for _, room := range result.rooms {
 				got = append(got, room.UID)
 			}
-			if !slices.Equal(got, tt.want) {
+			if result.complete || !slices.Equal(got, tt.want) {
 				t.Fatalf("partial rooms = %v, want %v", got, tt.want)
 			}
 		})
@@ -123,7 +202,7 @@ func TestProbeLocationsDiscardsPartialTopologyOnCancellation(t *testing.T) {
 		})
 		ctx, cancel := context.WithCancel(t.Context())
 		defer cancel()
-		done := make(chan []sonos.Speaker, 1)
+		done := make(chan topologyResult, 1)
 		go func() {
 			done <- a.probeLocations(ctx, []string{
 				"http://192.168.1.3/fast/description",
@@ -132,8 +211,8 @@ func TestProbeLocationsDiscardsPartialTopologyOnCancellation(t *testing.T) {
 		}()
 		synctest.Wait()
 		cancel()
-		if rooms := <-done; len(rooms) != 0 {
-			t.Fatalf("canceled discovery returned partial rooms: %+v", rooms)
+		if result := <-done; result.complete || len(result.rooms) != 0 {
+			t.Fatalf("canceled discovery returned partial rooms: %+v", result)
 		}
 	})
 }
@@ -159,9 +238,9 @@ func TestProbeLocationsCancelsStaleHostAfterSuccess(t *testing.T) {
 	})
 	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
 	defer cancel()
-	rooms := a.probeLocations(ctx, []string{"http://192.168.1.99/description", "http://192.168.1.3/description"})
-	if len(rooms) != 1 || ctx.Err() != nil || !staleCanceled.Load() {
-		t.Fatalf("healthy speaker blocked behind stale host: rooms=%d err=%v canceled=%v", len(rooms), ctx.Err(), staleCanceled.Load())
+	result := a.probeLocations(ctx, []string{"http://192.168.1.99/description", "http://192.168.1.3/description"})
+	if !result.complete || len(result.rooms) != 1 || ctx.Err() != nil || !staleCanceled.Load() {
+		t.Fatalf("healthy speaker blocked behind stale host: result=%+v err=%v canceled=%v", result, ctx.Err(), staleCanceled.Load())
 	}
 }
 

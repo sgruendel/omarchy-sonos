@@ -90,8 +90,9 @@ first. Playback and volume are polled every 3 seconds, topology/discovery every
 60 seconds while online and every 10 seconds while offline, the RP playlist
 every 15 seconds, and comments every 2 minutes. Up to four discovery probes
 run concurrently; only a complete topology cancels the remaining probes. If
-every probe is incomplete, discovery keeps the result with the most reachable
-rooms, preferring earlier cached hosts on ties.
+cached hosts supply only a partial topology, SSDP locations are also probed.
+If every probe is incomplete, discovery keeps the result with the most reachable
+rooms across both sets, preferring cached hosts and earlier locations on ties.
 Requests have timeouts. No inbound callback listener or subnet scan is used.
 
 If multicast is unavailable, provide a speaker IP when launching the shell with
@@ -109,6 +110,8 @@ UDP SSDP replies and TCP port 1400 to speakers, plus HTTPS to RP and its image C
 Use **Refresh** to immediately rediscover rooms and refresh RP metadata. The
 service restarts the backend with a capped delay if it exits. Commands run in
 order and report errors in the popup; rate requests are not automatically retried.
+Backend diagnostics stay visible across commands until replaced by a newer
+diagnostic or cleared when the backend exits.
 
 ## State and privacy
 
