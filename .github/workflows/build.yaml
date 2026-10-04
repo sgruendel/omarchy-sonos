@@ -87,7 +87,7 @@ jobs:
 
       - name: Download coverage reports
         if: steps.current.outputs.update == 'true'
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: coverage
 
