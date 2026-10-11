@@ -23,5 +23,6 @@ if ! mv "$staged" "$target"; then
 fi
 trap - EXIT
 omarchy-shell shell rescanPlugins
+sleep 2s
 omarchy plugin enable "$plugin_id"
 echo "Installed Sonos Paradise at $target"
