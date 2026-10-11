@@ -1,7 +1,7 @@
 # Sonos Paradise
 
 [![build](https://github.com/sgruendel/omarchy-sonos/actions/workflows/build.yaml/badge.svg)](https://github.com/sgruendel/omarchy-sonos/actions/workflows/build.yaml)
-[![Coverage](https://img.shields.io/badge/Coverage-79.5%25-brightgreen)](https://github.com/sgruendel/omarchy-sonos/actions/workflows/build.yaml)
+[![Coverage](https://img.shields.io/badge/Coverage-78.6%25-brightgreen)](https://github.com/sgruendel/omarchy-sonos/actions/workflows/build.yaml)
 
 An Omarchy Quattro bar plugin with a dependency-free Go backend. Control local
 Sonos speakers and see Radio Paradise artwork, listener scores, your rating,
