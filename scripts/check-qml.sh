@@ -13,4 +13,4 @@ trap 'rm -rf "$imports"' EXIT
 mkdir -p "$imports/qs"
 ln -s "$shell_root/Ui" "$imports/qs/Ui"
 ln -s "$shell_root/Commons" "$imports/qs/Commons"
-"$qml_tool" -I "$imports" "$root/Service.qml" "$root/Widget.qml" "$root/ActionButton.qml"
+"$qml_tool" -I "$imports" "$root/Service.qml" "$root/Widget.qml" "$root/ActionButton.qml" "$root/TransportButton.qml" "$root/VolumeSlider.qml" "$root/VolumeController.qml" "$root/PlayerShortcuts.qml"

@@ -22,3 +22,22 @@ The automated suite does not certify speaker firmware or account API behavior.
    Disconnect/reconnect the LAN and check offline state and recovery.
 9. Open the widget on two monitors and confirm one backend/session is shared.
    Check keyboard Tab, Escape, outside-click dismissal, and a narrow screen.
+10. Drag the volume slider and release: its percentage should hold until Sonos
+    confirms the change. Test keyboard arrows, wheel, mute/unmute, command failure,
+    and switching rooms; a previous room's pending volume must not carry over.
+    Hold an arrow key and scroll repeatedly during slow requests: focus should
+    stay on the slider and only the latest volume should be queued. Check a
+    speaker volume limit, returning to the current value, and volume changes
+    from speaker buttons. An unrelated RP failure must not reset the preview.
+11. Verify Space, Ctrl+Left/Right, Ctrl+Up/Down, and M with the popup focused.
+    Repeat with Next, the volume slider, and the mix dropdown focused:
+    Ctrl+Up/Down adjusts volume by 5 and the mix stays selected. Space toggles
+    playback from Next or the slider. On the focused mix dropdown, Space opens
+    the list; Up/Down browses options and Enter confirms once without toggling
+    playback or sending a request for each arrow press.
+    Type a username/password containing spaces and M without triggering playback
+    or mute. Verify timed tracks show progress; live radio has no invented duration.
+12. Expand room selection and Radio Paradise details. Check rating selection,
+    comments pagination, account access, long track/room names, and missing artwork.
+    Confirm the header shows the RP username when signed in and Signed out after
+    logout, without needing a mouse hover.

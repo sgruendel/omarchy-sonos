@@ -51,11 +51,26 @@ jobs:
             coverage-summary.out
           if-no-files-found: error
 
+  ui:
+    name: UI and Service Regression Tests
+    runs-on: ubuntu-latest
+    container: archlinux:base
+
+    steps:
+      - name: Install Qt and Quickshell
+        run: pacman -Syu --noconfirm --needed git make qt6-declarative quickshell ttf-dejavu
+
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Test UI and service
+        run: make test-ui test-service
+
   coverage-badge:
     name: Update Coverage Badge
     if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
-    needs: test
+    needs: [test, ui]
     permissions:
       contents: write
     concurrency:
@@ -114,7 +129,7 @@ jobs:
     name: Release Plugin Bundles
     if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
-    needs: test
+    needs: [test, ui]
     permissions:
       contents: write
     strategy:

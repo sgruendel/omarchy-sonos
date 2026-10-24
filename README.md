@@ -7,6 +7,7 @@ An Omarchy Quattro bar plugin with a dependency-free Go backend. Control local
 Sonos speakers and see Radio Paradise artwork, listener scores, your rating,
 and song comments. Sign in with your RP account to submit ratings from 1 to 10.
 
+Player layout inspired by [Omarchy Spotify](https://github.com/stappmus/Omarchy-Spotify).
 Inspired by [OmaSonos](https://github.com/ctl0v0/omasonos) and the RP API
 integration in [rptui](https://github.com/pdfrg/rptui). Audio stays on Sonos;
 this plugin does not run a second RP player.
@@ -16,6 +17,8 @@ this plugin does not run a second RP player.
 Requires Go 1.27+, Bash, an Omarchy Quattro shell with its plugin API, and Sonos
 speakers reachable on your LAN. There are no Go module dependencies, Python
 packages, Sonos cloud credentials, or runtime downloads.
+The full `make check` suite also needs Qt 6 Quick Test (`qmltestrunner`) and
+Quickshell for the UI and service regression tests.
 
 The backend uses Go's `encoding/json/v2` and `encoding/json/jsontext` packages,
 enabled by default in Go 1.27; no `GOEXPERIMENT` setting is needed.
@@ -48,6 +51,10 @@ SHA-256 checksums to GitHub Releases. Manual workflow runs build downloadable
 development artifacts.
 Dependabot checks Go modules and GitHub Actions weekly.
 
+A separate Arch Linux CI job installs Qt and Quickshell and runs the UI and
+service regression tests. Releases and coverage badge updates require both
+the Go and UI/service jobs to pass.
+
 The Go entry point and state logic live in `main.go` and `app.go` at the repository
 root; `commands.go`, `protocol.go`, and `discovery.go` own command dispatch,
 JSON Lines framing, and concurrent discovery probes. The `sonos` package owns
@@ -66,7 +73,23 @@ the widget's selector in sync with supported channels.
 - Middle click toggles playback. The wheel changes the selected room's volume
   in steps of 5. Playback commands target that room's group coordinator.
 - Select a room to control its session. Volume and mute affect that room only.
-- Transport buttons follow the actions Sonos advertises for the current source.
+- The compact player places artwork beside the song details, with icon transport
+  controls and a room volume slider. Click the speaker icon to mute or unmute;
+  drag the slider, use its arrow keys, or scroll over it to adjust volume.
+  Arrow keys and wheel scrolling use steps of 5. Repeated input is combined
+  into the latest requested volume while a command is running; the slider
+  stays responsive and settles to the volume the speaker actually reports.
+  Transport buttons follow the actions Sonos advertises for the current source.
+  Timed tracks show elapsed/total time and a read-only progress bar.
+- Click **Playing on / Listening on** to select a room. Expand **Radio Paradise**
+  for ratings, comments, and mix settings; the account icon opens **RP account**.
+  The header shows your RP username or **RP: Signed out** without hovering.
+- With the popup focused, Space toggles playback, Ctrl+Left/Right skips tracks,
+  Ctrl+Up/Down adjusts volume by 5, and M toggles mute. Tab moves between controls;
+  Enter activates buttons and arrow keys adjust the focused volume slider.
+  Playback shortcuts are inactive while editing the account fields.
+  Space opens the focused RP mix dropdown instead of toggling playback. With
+  the list open, use Up/Down to browse and Enter to confirm the mix once.
 - An RP stream shows matched song artwork, album, and listener rating/count.
   Signing in adds your personal rating and comments, loaded 20 at a time.
 - Open **RP account**, sign in, then select a rating from 1 to 10. Sign out removes
@@ -145,13 +168,21 @@ stdout; diagnostics use stderr. See [docs/protocol.md](docs/protocol.md).
 
 ## Validation and current scope
 
-`make check` runs race-enabled Go tests, `go vet`, and Omarchy's manifest
-validator. Tests use simulated Sonos SOAP and RP HTTP servers, including song
-transitions, API failures, auth persistence, and comment pagination. A local
-hardware/account acceptance checklist is in [docs/acceptance.md](docs/acceptance.md).
+`make check` runs race-enabled Go tests, the UI and service regression tests,
+`go vet`, and Omarchy's manifest validator. Go tests use simulated Sonos SOAP and
+RP HTTP servers, including song transitions, API failures, auth persistence,
+and comment pagination. A local hardware/account acceptance checklist is in
+[docs/acceptance.md](docs/acceptance.md).
 
 Optional checks: `make check-qml` checks QML with installed Omarchy
 imports (Qt may report static type warnings for dynamic shell properties).
+The UI/service suites also run independently: `make test-ui` runs headless Qt
+control tests for volume feedback, request coalescing, and shortcuts with
+focused buttons, sliders, dropdowns, and account fields. It requires Qt 6
+Quick Test (`qmltestrunner`); only theme tokens are
+substituted. `make test-service` uses Quickshell and an inert backend to check
+request IDs and completion after snapshots, including volume caps and failures.
+Neither test command connects to speakers or RP or changes your desktop.
 `RP_LIVE_TEST=1 go test -run TestLivePublicRP -v ./rp` checks the public RP
 playlist endpoint without credentials or mutations.
 
