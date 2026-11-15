@@ -5,9 +5,14 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
+
+	"omarchy-sonos/sonos"
+	"omarchy-sonos/storage"
 )
 
 func TestMissingCommandFieldsDoNotPerformIO(t *testing.T) {
@@ -117,5 +122,129 @@ func TestVolumeDeltaClampsWithoutOverflow(t *testing.T) {
 				t.Fatalf("volume command: %v, writes=%d", err, writes)
 			}
 		})
+	}
+}
+
+// speakerControls serves the given transport state and advertised actions, and
+// records control requests with their arguments. Other requests reach the
+// fixture's speaker.
+func speakerControls(t *testing.T, a *App, state sonos.TransportState, actions string) *[]map[string]string {
+	t.Helper()
+	base := a.Sonos.HTTP.Transport
+	var calls []map[string]string
+	a.Sonos.HTTP.Transport = transportFunc(func(r *http.Request) (*http.Response, error) {
+		if r.Method != http.MethodPost {
+			return base.RoundTrip(r)
+		}
+		action := strings.TrimSuffix(strings.Split(r.Header.Get("SOAPACTION"), "#")[1], `"`)
+		switch action {
+		case "GetTransportInfo":
+			return response("<Envelope><Body><Response><CurrentTransportState>" + string(state) + "</CurrentTransportState></Response></Body></Envelope>"), nil
+		case "GetCurrentTransportActions":
+			return response("<Envelope><Body><Response><Actions>" + actions + "</Actions></Response></Body></Envelope>"), nil
+		case "Play", "Pause", "Next", "Previous":
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			args, err := sonos.Values(body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			args["action"] = action
+			calls = append(calls, args)
+			return response("<Envelope><Body/></Envelope>"), nil
+		}
+		return base.RoundTrip(r)
+	})
+	return &calls
+}
+
+func TestTransportCommandsFollowStateAndAdvertisedActions(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		op      Op
+		state   sonos.TransportState
+		actions string
+		want    sonos.TransportAction // empty: the command must fail without a request
+	}{
+		{"pause while playing", OpPlayPause, sonos.StatePlaying, "Play, Pause, Next, Previous", sonos.ActionPause},
+		{"play while paused", OpPlayPause, sonos.StatePausedPlayback, "Play,Pause", sonos.ActionPlay},
+		{"play while stopped", OpPlayPause, sonos.StateStopped, "Play,Stop", sonos.ActionPlay},
+		{"play while transitioning", OpPlayPause, sonos.StateTransitioning, "Play", sonos.ActionPlay},
+		{"next", OpNext, sonos.StatePlaying, "Pause,Next", sonos.ActionNext},
+		{"next while paused", OpNext, sonos.StatePausedPlayback, "Play,Next", sonos.ActionNext},
+		{"previous", OpPrevious, sonos.StatePlaying, "Pause,Previous", sonos.ActionPrevious},
+		{"pause not advertised", OpPlayPause, sonos.StatePlaying, "Stop", ""},
+		{"play not advertised", OpPlayPause, sonos.StateStopped, "Stop", ""},
+		{"next not advertised", OpNext, sonos.StatePlaying, "Pause,Stop", ""},
+		{"previous not advertised", OpPrevious, sonos.StatePlaying, "Pause,Next", ""},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			a, _, _, _ := fixture(t)
+			calls := speakerControls(t, a, tt.state, tt.actions)
+			err := a.Execute(t.Context(), Command{Op: tt.op})
+			if tt.want == "" {
+				if err == nil || !strings.Contains(err.Error(), "unavailable") || len(*calls) != 0 {
+					t.Fatalf("unadvertised action: err=%v, calls=%v", err, *calls)
+				}
+				return
+			}
+			if err != nil || len(*calls) != 1 || (*calls)[0]["action"] != string(tt.want) {
+				t.Fatalf("%s: err=%v, calls=%v, want one %s", tt.op, err, *calls, tt.want)
+			}
+			if got := (*calls)[0]; got["InstanceID"] != "0" || (tt.want == sonos.ActionPlay) != (got["Speed"] == "1") {
+				t.Fatalf("%s arguments: %v", tt.want, got)
+			}
+		})
+	}
+}
+
+func TestSpeakerCommandsRequireReadyStatus(t *testing.T) {
+	for _, op := range []Op{OpPlayPause, OpNext, OpPrevious, OpSetMute, OpSetVolume, OpAdjustVolume} {
+		t.Run(string(op), func(t *testing.T) {
+			a, _, _, _ := fixture(t)
+			a.Sonos.HTTP.Transport = transportFunc(func(r *http.Request) (*http.Response, error) {
+				t.Errorf("offline command made request to %s", r.URL.Path)
+				return response(`{}`), nil
+			})
+			a.Snapshot.Status = StatusOffline
+			err := a.Execute(t.Context(), Command{Op: op, Volume: new(10), Delta: new(5), Mute: new(true)})
+			if err == nil || err.Error() != "Sonos is offline" {
+				t.Fatalf("offline %s: %v", op, err)
+			}
+		})
+	}
+}
+
+func TestSelectRoomPersistsOnlyKnownRooms(t *testing.T) {
+	a, _, _, _ := fixture(t)
+	if err := os.Remove(a.StatePath); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Execute(t.Context(), Command{Op: OpSelectRoom, Room: "RINCON_UNKNOWN"}); err == nil || a.State.Selected != "RINCON_A" {
+		t.Fatalf("unknown room: err=%v, selected=%q", err, a.State.Selected)
+	}
+	if _, err := os.Stat(a.StatePath); !os.IsNotExist(err) {
+		t.Fatalf("unknown room was persisted: %v", err)
+	}
+	a.State.Selected = ""
+	if err := a.Execute(t.Context(), Command{Op: OpSelectRoom, Room: "RINCON_A"}); err != nil {
+		t.Fatal(err)
+	}
+	var saved State
+	if err := storage.Load(a.StatePath, &saved); err != nil || saved.Selected != "RINCON_A" || !slices.Contains(saved.Hosts, "192.168.1.3") {
+		t.Fatalf("selected room not persisted: %+v, %v", saved, err)
+	}
+}
+
+func TestUnknownCommandIsRejected(t *testing.T) {
+	a, _, _, _ := fixture(t)
+	a.Sonos.HTTP.Transport = transportFunc(func(r *http.Request) (*http.Response, error) {
+		t.Errorf("unknown command made request to %s", r.URL.Path)
+		return response(`{}`), nil
+	})
+	if err := a.Execute(t.Context(), Command{Op: "reboot"}); err == nil || err.Error() != `unknown command "reboot"` {
+		t.Fatalf("unknown command: %v", err)
 	}
 }
