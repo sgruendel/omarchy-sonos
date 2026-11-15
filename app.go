@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"net/url"
 	"path/filepath"
 	"slices"
@@ -82,6 +83,7 @@ type App struct {
 	lastComments    time.Time
 	ratings         map[int64]int
 	startupWarning  string
+	persisted       State // what state.json holds, to skip unchanged saves
 }
 
 func newApp(dir string, hosts []string) (*App, error) {
@@ -99,6 +101,7 @@ func newApp(dir string, hosts []string) (*App, error) {
 	if err := storage.Load(a.StatePath, &a.State); err != nil {
 		return nil, fmt.Errorf("could not load speaker state: %w", err)
 	}
+	a.persisted = cloneState(a.State)
 	if a.State.Channels == nil {
 		a.State.Channels = map[string]int{}
 	}
@@ -126,7 +129,25 @@ func newApp(dir string, hosts []string) (*App, error) {
 	}
 	return a, nil
 }
-func (a *App) save() error { return storage.Save(a.StatePath, a.State) }
+func (a *App) save() error {
+	if err := storage.Save(a.StatePath, a.State); err != nil {
+		return err
+	}
+	a.persisted = cloneState(a.State)
+	return nil
+}
+
+// saveIfChanged skips the write and fsync when State already matches
+// state.json, as it does after most periodic discoveries.
+func (a *App) saveIfChanged() error {
+	if a.State.Selected == a.persisted.Selected && slices.Equal(a.State.Hosts, a.persisted.Hosts) && maps.Equal(a.State.Channels, a.persisted.Channels) {
+		return nil
+	}
+	return a.save()
+}
+func cloneState(s State) State {
+	return State{Selected: s.Selected, Hosts: slices.Clone(s.Hosts), Channels: maps.Clone(s.Channels)}
+}
 func (a *App) discover(ctx context.Context) error {
 	a.lastDiscovery = time.Now()
 	var locations []string
@@ -151,7 +172,7 @@ func (a *App) discover(ctx context.Context) error {
 	if !slices.ContainsFunc(rooms, func(s sonos.Speaker) bool { return s.UID == a.State.Selected }) {
 		a.State.Selected = rooms[0].UID
 	}
-	return a.save()
+	return a.saveIfChanged()
 }
 func (a *App) targets() (sonos.Speaker, sonos.Speaker, error) {
 	var room sonos.Speaker
