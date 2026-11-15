@@ -26,6 +26,12 @@ func TestMissingCommandFieldsDoNotPerformIO(t *testing.T) {
 		`{"op":"rpRate","room":"RINCON_A","songId":42}`,
 		`{"op":"rpRate","songId":42,"rating":10}`,
 		`{"op":"rpRate","room":"RINCON_A","songId":0,"rating":10}`,
+		`{"op":"rpRate","room":"RINCON_A","songId":42,"rating":0}`,
+		`{"op":"rpRate","room":"RINCON_A","songId":42,"rating":11}`,
+		`{"op":"rpChannel"}`,
+		`{"op":"rpChannel","channel":null}`,
+		`{"op":"rpChannel","channel":4}`,
+		`{"op":"rpChannel","channel":-2}`,
 		`{"op":"rpComments","offset":0}`,
 		`{"op":"rpComments","songId":42}`,
 		`{"op":"rpComments","songId":42,"offset":null}`,
@@ -47,6 +53,19 @@ func TestMissingCommandFieldsDoNotPerformIO(t *testing.T) {
 				t.Fatal("missing or invalid field accepted")
 			}
 		})
+	}
+}
+
+func TestMixOverrideRequiresSelectedRoom(t *testing.T) {
+	a, _, _, _ := fixture(t)
+	a.State.Selected = ""
+	for _, channel := range []int{2, -1} {
+		if err := a.Execute(t.Context(), Command{Op: OpRPChannel, Channel: &channel}); err == nil {
+			t.Fatalf("channel %d accepted without a selected room", channel)
+		}
+	}
+	if _, ok := a.State.Channels[""]; ok {
+		t.Fatalf("override stored without a room: %v", a.State.Channels)
 	}
 }
 

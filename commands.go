@@ -11,6 +11,8 @@ import (
 	"omarchy-sonos/sonos"
 )
 
+// validate checks a command's own fields before any IO. Checks that depend on
+// the app's state (selected room, current song) stay in Execute.
 func (c Command) validate() error {
 	switch c.Op {
 	case OpSetVolume:
@@ -25,18 +27,31 @@ func (c Command) validate() error {
 		if c.Mute == nil {
 			return errors.New("mute is required")
 		}
-	case OpRPRate, OpRPComments:
+	case OpRPChannel:
+		if c.Channel == nil {
+			return errors.New("channel is required")
+		}
+		if _, ok := rp.Channels[*c.Channel]; !ok && *c.Channel != rp.NoChannel {
+			return errors.New("invalid RP mix")
+		}
+	case OpRPRate:
 		if c.SongID == nil || *c.SongID <= 0 {
 			return errors.New("a positive songId is required")
 		}
-		if c.Op == OpRPRate {
-			if c.Rating == nil {
-				return errors.New("rating is required")
-			}
-			if c.Room == "" {
-				return errors.New("room is required")
-			}
-		} else if c.Offset == nil || *c.Offset < 0 {
+		if c.Rating == nil {
+			return errors.New("rating is required")
+		}
+		if *c.Rating < 1 || *c.Rating > 10 {
+			return errors.New("rating must be between 1 and 10")
+		}
+		if c.Room == "" {
+			return errors.New("room is required")
+		}
+	case OpRPComments:
+		if c.SongID == nil || *c.SongID <= 0 {
+			return errors.New("a positive songId is required")
+		}
+		if c.Offset == nil || *c.Offset < 0 {
 			return errors.New("a nonnegative offset is required")
 		}
 	}
@@ -75,23 +90,18 @@ func (a *App) Execute(ctx context.Context, c Command) error {
 		a.ratings = map[int64]int{}
 		return nil
 	case OpRPChannel:
-		if c.Channel == nil {
-			return errors.New("channel is required")
+		// Overrides are stored per room; without one the "" key would persist.
+		if a.State.Selected == "" {
+			return errors.New("select a Sonos room first")
 		}
 		if *c.Channel == rp.NoChannel {
 			delete(a.State.Channels, a.State.Selected)
 		} else {
-			if _, ok := rp.Channels[*c.Channel]; !ok {
-				return errors.New("invalid RP mix")
-			}
 			a.State.Channels[a.State.Selected] = *c.Channel
 		}
 		a.lastPlaylist = time.Time{}
 		return a.save()
 	case OpRPRate:
-		if *c.Rating < 1 || *c.Rating > 10 {
-			return errors.New("rating must be between 1 and 10")
-		}
 		if c.Room != a.State.Selected {
 			return errors.New("selected room changed; try again")
 		}
