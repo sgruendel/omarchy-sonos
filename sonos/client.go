@@ -74,7 +74,21 @@ type Playback struct {
 }
 type Client struct{ HTTP *http.Client }
 
-func New() *Client { return &Client{HTTP: &http.Client{Timeout: 4 * time.Second}} }
+// New returns a client that only connects to local IP addresses and refuses
+// redirects. Speaker locations come from SSDP replies and other speakers'
+// topology, so a LAN device must not be able to point requests elsewhere.
+func New() *Client {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.Proxy = nil // Speakers are on the LAN; never route through a proxy.
+	transport.DialContext = localDialer(4 * time.Second).DialContext
+	return &Client{HTTP: &http.Client{
+		Timeout:   4 * time.Second,
+		Transport: transport,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}}
+}
 
 func (c *Client) Describe(ctx context.Context, location string) (Speaker, error) {
 	u, err := url.Parse(location)

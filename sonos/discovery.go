@@ -3,11 +3,13 @@ package sonos
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
 	"net/url"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -87,10 +89,32 @@ func ssdpLocation(message string, peer net.IP) string {
 	}
 	return u.String()
 }
-func HostLocation(host string) (string, error) {
+
+// ErrNotLocal reports a speaker connection to an address outside the LAN.
+var ErrNotLocal = errors.New("speaker address must be a local IP address")
+
+// localIP reports whether host is a private, loopback or link-local IP address.
+func localIP(host string) bool {
 	ip := net.ParseIP(host)
-	if ip == nil || (!ip.IsPrivate() && !ip.IsLoopback() && !ip.IsLinkLocalUnicast()) {
+	return ip != nil && (ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast())
+}
+
+// localDialer refuses connections to non-local addresses. Control sees the
+// resolved address, so hostnames are covered, before any packet is sent.
+func localDialer(timeout time.Duration) *net.Dialer {
+	return &net.Dialer{
+		Timeout: timeout,
+		Control: func(_, address string, _ syscall.RawConn) error {
+			if host, _, err := net.SplitHostPort(address); err != nil || !localIP(host) {
+				return ErrNotLocal
+			}
+			return nil
+		},
+	}
+}
+func HostLocation(host string) (string, error) {
+	if !localIP(host) {
 		return "", fmt.Errorf("speaker host must be a local IP address")
 	}
-	return "http://" + net.JoinHostPort(ip.String(), "1400") + "/xml/device_description.xml", nil
+	return "http://" + net.JoinHostPort(net.ParseIP(host).String(), "1400") + "/xml/device_description.xml", nil
 }

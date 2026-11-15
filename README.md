@@ -167,7 +167,9 @@ widget clears the password field on submission/close. Tokens stay out of stdout.
 RP's auth API uses HTTPS query parameters, as in rptui; errors never echo these
 URLs, and API redirects are refused. Sign out to delete the saved token.
 
-Only RP metadata/account requests and cover images leave the LAN. Comments are
+Only RP metadata/account requests and cover images leave the LAN. Speaker
+requests connect only to private, loopback, or link-local IP addresses, never
+follow redirects, and bypass any configured HTTP proxy. Comments are
 converted to plain text and rendered with `Text.PlainText`. The backend receives
 JSON Lines on stdin and emits `snapshot` and correlated `result` records on
 stdout; diagnostics use stderr. See [docs/protocol.md](docs/protocol.md).
