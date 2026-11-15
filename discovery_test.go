@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"os"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"omarchy-sonos/sonos"
+	"omarchy-sonos/storage"
 )
 
 func topologyProbeFixture(t *testing.T, reachable map[string][]string) *App {
@@ -321,5 +323,22 @@ func TestPlaybackFailureClearsStaleMetadata(t *testing.T) {
 	a.Refresh(t.Context(), false)
 	if a.Snapshot.Status != StatusOffline || a.Snapshot.Playback.Title != "" || a.Snapshot.RP.Song != nil || a.Snapshot.RP.CanRate {
 		t.Fatal("offline snapshot retained stale playback or rating")
+	}
+}
+
+func TestDiscoverySavesStateOnlyWhenChanged(t *testing.T) {
+	a, _, _, _ := fixture(t) // Its first discovery saved the seed host and room.
+	if err := os.Remove(a.StatePath); err != nil {
+		t.Fatal(err)
+	}
+	a.Refresh(t.Context(), true)
+	if _, err := os.Stat(a.StatePath); !os.IsNotExist(err) {
+		t.Fatalf("unchanged discovery rewrote state: %v", err)
+	}
+	a.State.Hosts = append(a.State.Hosts, "192.168.1.9")
+	a.Refresh(t.Context(), true)
+	var saved State
+	if err := storage.Load(a.StatePath, &saved); err != nil || !slices.Equal(saved.Hosts, a.State.Hosts) || saved.Selected != "RINCON_A" {
+		t.Fatalf("changed discovery state not saved: %+v, %v", saved, err)
 	}
 }
