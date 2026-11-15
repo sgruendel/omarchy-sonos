@@ -1,6 +1,7 @@
 package rp
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -8,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestDetectionAndMatching(t *testing.T) {
@@ -272,5 +274,37 @@ func TestCommentsRequireAccount(t *testing.T) {
 	_, err := c.Comments(t.Context(), 42, 0)
 	if !errors.Is(err, ErrCommentsAuth) {
 		t.Fatalf("expected sign-in prompt, got %v", err)
+	}
+}
+
+func TestRequestErrorsNameFailureKindWithoutURL(t *testing.T) {
+	srv := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-r.Context().Done() // Never answer; the client gives up first.
+	}))
+	c := New(filepath.Join(t.TempDir(), "session"))
+	c.HTTP.Transport = srv.Client().Transport
+	c.Base = srv.URL
+	canceled, cancel := context.WithCancel(t.Context())
+	cancel()
+	for _, tt := range []struct {
+		name    string
+		ctx     context.Context
+		timeout time.Duration
+		want    string
+	}{
+		{"client timeout", t.Context(), 50 * time.Millisecond, "Radio Paradise request timed out"},
+		{"context canceled", canceled, time.Minute, "Radio Paradise request canceled"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			c.HTTP.Timeout = tt.timeout
+			_, err := c.Playlist(tt.ctx, 0)
+			if err == nil || err.Error() != tt.want {
+				t.Fatalf("error = %v, want %q", err, tt.want)
+			}
+		})
+	}
+	c.HTTP.Transport = roundTripFunc(func(r *http.Request) (*http.Response, error) { return nil, &urlError{message: r.URL.String()} })
+	if _, err := c.Playlist(t.Context(), 0); err == nil || err.Error() != "Radio Paradise request failed (network error)" {
+		t.Fatalf("other failures: %v", err)
 	}
 }

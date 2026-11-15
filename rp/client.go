@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"html"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -109,7 +110,7 @@ func (c *Client) request(ctx context.Context, path string, params url.Values, ou
 	}
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
-		return errors.New("Radio Paradise request failed (network or timeout)")
+		return requestError(err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
@@ -122,6 +123,18 @@ func (c *Client) request(ctx context.Context, path string, params url.Values, ou
 		return errors.New("invalid Radio Paradise response")
 	}
 	return nil
+}
+
+// requestError reports only the kind of transport failure. *url.Error includes
+// the request URL, and RP's auth API carries credentials in its query.
+func requestError(err error) error {
+	if errors.Is(err, context.Canceled) {
+		return errors.New("Radio Paradise request canceled")
+	}
+	if netErr, ok := errors.AsType[net.Error](err); errors.Is(err, context.DeadlineExceeded) || (ok && netErr.Timeout()) {
+		return errors.New("Radio Paradise request timed out")
+	}
+	return errors.New("Radio Paradise request failed (network error)")
 }
 func (c *Client) Login(ctx context.Context, username, password string) error {
 	if strings.TrimSpace(username) == "" || password == "" {

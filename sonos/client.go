@@ -186,7 +186,12 @@ func (c *Client) Call(ctx context.Context, s Speaker, service, action string, ar
 	req.Header.Set("SOAPACTION", `"`+svc.Type+"#"+action+`"`)
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("Sonos %s request failed", action)
+		// Keep the cause (timeout, refused, ...) but not *url.Error's method and
+		// URL: the action already names the request and the UI shows this text.
+		if urlErr, ok := errors.AsType[*url.Error](err); ok {
+			err = urlErr.Err
+		}
+		return nil, fmt.Errorf("Sonos %s request failed: %w", action, err)
 	}
 	defer resp.Body.Close()
 	data, err := io.ReadAll(io.LimitReader(resp.Body, 2<<20))
