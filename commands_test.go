@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"omarchy-sonos/sonos"
 	"omarchy-sonos/storage"
@@ -265,5 +266,30 @@ func TestUnknownCommandIsRejected(t *testing.T) {
 	})
 	if err := a.Execute(t.Context(), Command{Op: "reboot"}); err == nil || err.Error() != `unknown command "reboot"` {
 		t.Fatalf("unknown command: %v", err)
+	}
+}
+
+func TestSigningInResetsRPCachesOnlyOnSuccess(t *testing.T) {
+	a, _, _, _ := fixture(t)
+	base := a.RP.HTTP.Transport
+	a.RP.HTTP.Transport = transportFunc(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path != "/api/auth" {
+			return base.RoundTrip(r)
+		}
+		if r.URL.Query().Get("passwd") != "right" {
+			return response(`{"status":"failure"}`), nil
+		}
+		return response(`{"status":"success","username":"user","passwd":"new-token","user_id":"123"}`), nil
+	})
+	a.ratings[42] = 9
+	a.lastPlaylist, a.lastComments = time.Now(), time.Now()
+	if err := a.Execute(t.Context(), Command{Op: OpRPLogin, Username: "user", Password: "wrong"}); err == nil || a.ratings[42] != 9 || a.lastPlaylist.IsZero() || a.lastComments.IsZero() {
+		t.Fatalf("failed sign-in: err=%v, ratings=%v; caches must stay", err, a.ratings)
+	}
+	if err := a.Execute(t.Context(), Command{Op: OpRPLogin, Username: "user", Password: "right"}); err != nil {
+		t.Fatal(err)
+	}
+	if len(a.ratings) != 0 || !a.lastPlaylist.IsZero() || !a.lastComments.IsZero() || a.RP.Session.PasswordToken != "new-token" {
+		t.Fatalf("sign-in kept stale RP state: ratings=%v, playlist=%v, comments=%v", a.ratings, a.lastPlaylist, a.lastComments)
 	}
 }
