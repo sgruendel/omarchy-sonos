@@ -120,7 +120,8 @@ the RP request; these independent systems provide no atomic operation.
 
 ## Discovery and troubleshooting
 
-SSDP discovery runs on active IPv4 interfaces. Cached speaker IPs are tried
+SSDP discovery runs on active IPv4 interfaces and repeats its search three
+times, 250 ms apart, in case a UDP packet is lost. Cached speaker IPs are tried
 first. Playback and volume are polled every 3 seconds, topology/discovery every
 60 seconds while online and every 10 seconds while offline, the RP playlist
 every 15 seconds, and comments every 2 minutes. Up to four discovery probes

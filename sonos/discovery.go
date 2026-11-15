@@ -11,11 +11,27 @@ import (
 	"time"
 )
 
+// SSDP runs over UDP, so a single M-SEARCH (or its replies) can be lost,
+// especially on Wi-Fi. Send it a few times, as UPnP recommends.
+const (
+	ssdpSearches       = 3
+	ssdpResendInterval = 250 * time.Millisecond
+)
+
+var (
+	ssdpGroup   = &net.UDPAddr{IP: net.IPv4(239, 255, 255, 250), Port: 1900}
+	ssdpMSearch = []byte("M-SEARCH * HTTP/1.1\r\nHOST: 239.255.255.250:1900\r\nMAN: \"ssdp:discover\"\r\nMX: 2\r\nST: urn:schemas-upnp-org:device:ZonePlayer:1\r\n\r\n")
+)
+
 // Discover sends SSDP from each active IPv4 interface so Wi-Fi and Ethernet work.
 func Discover(ctx context.Context, window time.Duration) []string {
 	interfaces, _ := net.Interfaces()
-	found := make(chan string, 128)
 	var connections []*net.UDPConn
+	defer func() {
+		for _, c := range connections {
+			_ = c.Close()
+		}
+	}()
 	for _, iface := range interfaces {
 		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
 			continue
@@ -31,30 +47,43 @@ func Discover(ctx context.Context, window time.Duration) []string {
 				continue
 			}
 			connections = append(connections, conn)
-			_ = conn.SetDeadline(time.Now().Add(window))
-			_, _ = conn.WriteToUDP([]byte("M-SEARCH * HTTP/1.1\r\nHOST: 239.255.255.250:1900\r\nMAN: \"ssdp:discover\"\r\nMX: 2\r\nST: urn:schemas-upnp-org:device:ZonePlayer:1\r\n\r\n"), &net.UDPAddr{IP: net.ParseIP("239.255.255.250"), Port: 1900})
-			go func(c *net.UDPConn) {
-				buf := make([]byte, 8192)
-				for {
-					n, peer, err := c.ReadFromUDP(buf)
-					if err != nil {
-						return
-					}
-					if loc := ssdpLocation(string(buf[:n]), peer.IP); loc != "" {
-						select {
-						case found <- loc:
-						default:
-						}
-					}
-				}
-			}(conn)
 		}
 	}
-	defer func() {
-		for _, c := range connections {
-			_ = c.Close()
+	return search(ctx, window, connections, ssdpGroup)
+}
+
+// search sends M-SEARCH from each connection to group, repeating it while the
+// window is open, and collects unique speaker locations. Readers stop at the
+// window's deadline or when the caller closes the connections.
+func search(ctx context.Context, window time.Duration, connections []*net.UDPConn, group *net.UDPAddr) []string {
+	found := make(chan string, 128)
+	for _, conn := range connections {
+		_ = conn.SetDeadline(time.Now().Add(window))
+		go func() {
+			buf := make([]byte, 8192)
+			for {
+				n, peer, err := conn.ReadFromUDP(buf)
+				if err != nil {
+					return
+				}
+				if loc := ssdpLocation(string(buf[:n]), peer.IP); loc != "" {
+					select {
+					case found <- loc:
+					default:
+					}
+				}
+			}
+		}()
+	}
+	send := func() {
+		for _, conn := range connections {
+			_, _ = conn.WriteToUDP(ssdpMSearch, group)
 		}
-	}()
+	}
+	send()
+	sent := 1
+	resend := time.NewTicker(ssdpResendInterval)
+	defer resend.Stop()
 	timer := time.NewTimer(window)
 	defer timer.Stop()
 	seen := map[string]bool{}
@@ -65,6 +94,11 @@ func Discover(ctx context.Context, window time.Duration) []string {
 			if !seen[loc] {
 				seen[loc] = true
 				out = append(out, loc)
+			}
+		case <-resend.C:
+			if sent < ssdpSearches {
+				send()
+				sent++
 			}
 		case <-timer.C:
 			return out
