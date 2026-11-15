@@ -15,8 +15,10 @@ this plugin does not run a second RP player.
 ## Build and install
 
 Requires Go 1.27+, Bash, an Omarchy Quattro shell with its plugin API, and Sonos
-speakers reachable on your LAN. There are no Go module dependencies, Python
-packages, Sonos cloud credentials, or runtime downloads.
+speakers reachable on your LAN. The backend has no Go module dependencies,
+Python packages, Sonos cloud credentials, or runtime downloads. staticcheck and
+govulncheck are pinned in `go.mod` as development tools and are not compiled
+into the backend.
 The full `make check` suite also needs Qt 6 Quick Test (`qmltestrunner`) and
 Quickshell for the UI and service regression tests.
 
@@ -40,15 +42,19 @@ For a distributable plugin folder, run `make stage`. Its Go binary is built for
 the current OS/architecture; rebuild for other machines. The source checkout's
 `sonos-backend` launcher expects `bin/omarchy-sonos`, so build before enabling it.
 
-GitHub Actions checks formatting, runs race-enabled tests and `go vet`, and builds
-the Go backend on pushes to `main` and pull requests. Each successful test job
+GitHub Actions checks formatting, `go.mod` tidiness, `go vet`, and staticcheck,
+runs race-enabled tests, and builds the Go backend on pushes to `main` and pull
+requests, using the minimum Go version from `go.mod`. A separate job runs
+govulncheck with the latest Go release, and the workflow also runs weekly so
+newly published vulnerabilities surface without a push. Each successful test job
 uploads a coverage profile and function summary. Successful pushes and manual
 runs on `main` update the README coverage badge with a bot commit when its value
 changes; the badge job skips results if `main` has advanced since testing.
 The badge job needs permission to push to `main`, including any branch rules.
 Tags starting with `v` also publish Linux amd64 and arm64 plugin bundles with
-SHA-256 checksums to GitHub Releases. Manual workflow runs build downloadable
-development artifacts.
+SHA-256 checksums to GitHub Releases. Release binaries are built with the
+latest Go release so they include its standard library security fixes. Manual
+workflow runs build downloadable development artifacts.
 Dependabot checks Go modules and GitHub Actions weekly.
 
 A separate Arch Linux CI job installs Qt and Quickshell and runs the UI and
@@ -168,8 +174,10 @@ stdout; diagnostics use stderr. See [docs/protocol.md](docs/protocol.md).
 
 ## Validation and current scope
 
-`make check` runs race-enabled Go tests, the UI and service regression tests,
-`go vet`, and Omarchy's manifest validator. Go tests use simulated Sonos SOAP and
+`make check` runs `make lint` (`go vet`, gofmt, `go mod tidy -diff`, and
+staticcheck), race-enabled Go tests, the UI and service regression tests, and
+Omarchy's manifest validator. `make vuln` runs govulncheck and needs network
+access. Go tests use simulated Sonos SOAP and
 RP HTTP servers, including song transitions, API failures, auth persistence,
 and comment pagination. A local hardware/account acceptance checklist is in
 [docs/acceptance.md](docs/acceptance.md).

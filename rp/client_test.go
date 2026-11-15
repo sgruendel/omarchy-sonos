@@ -163,7 +163,7 @@ func TestMixesIncludeAllSupportedChannels(t *testing.T) {
 }
 func TestErrorsNeverExposePasswordOrToken(t *testing.T) {
 	srv := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "https://example.com/?password=secret", 302)
+		http.Redirect(w, r, "https://example.com/?password=secret", http.StatusFound)
 	}))
 	c := New(filepath.Join(t.TempDir(), "session"))
 	c.HTTP.Transport = srv.Client().Transport
