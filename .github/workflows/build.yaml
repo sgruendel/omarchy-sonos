@@ -167,6 +167,17 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v7
 
+      # The backend embeds manifest.json's version for snapshots and RP's
+      # User-Agent, so a tag must match it.
+      - name: Check tag matches manifest version
+        if: github.ref_type == 'tag'
+        run: |
+          manifest_tag="v$(jq -r .version manifest.json)"
+          if [ "$manifest_tag" != "$GITHUB_REF_NAME" ]; then
+            echo "::error file=manifest.json::Tag $GITHUB_REF_NAME does not match manifest.json version ($manifest_tag)"
+            exit 1
+          fi
+
       # Release binaries embed the standard library, so build them with the
       # latest Go release to ship its security fixes. The test job still
       # checks the minimum version from go.mod.
