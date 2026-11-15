@@ -9,6 +9,9 @@ import (
 	"omarchy-sonos/sonos"
 )
 
+// maxConcurrentProbes bounds speaker probes per discovery.
+const maxConcurrentProbes = 4
+
 type topologyResult struct {
 	rooms    []sonos.Speaker
 	complete bool
@@ -40,7 +43,11 @@ func (a *App) discoverRooms(ctx context.Context, locations []string, ssdp func(c
 func (a *App) probeLocations(ctx context.Context, locations []string) topologyResult {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	slots := make(chan struct{}, 4)
+	// A buffered channel bounds concurrency rather than errgroup.SetLimit, which
+	// would make golang.org/x/sync the backend's only runtime dependency (the
+	// README promises none). No error needs propagating: a failed probe simply
+	// contributes no rooms.
+	slots := make(chan struct{}, maxConcurrentProbes)
 	result := make(chan []sonos.Speaker, 1)
 	partial := make([][]sonos.Speaker, len(locations))
 	var workers sync.WaitGroup

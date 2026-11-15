@@ -282,6 +282,9 @@ func (c *Client) Topology(ctx context.Context, s Speaker) ([]Speaker, error) {
 	}
 	// Describe members concurrently: with serial requests, each unreachable room
 	// adds a full client timeout and a few of them exhaust the caller's deadline.
+	// The buffered channel bounds concurrency without errgroup, keeping the
+	// backend free of runtime dependencies; a failed member only marks the
+	// topology incomplete, so there is no error to propagate.
 	described := make([]bool, len(members))
 	slots := make(chan struct{}, maxConcurrentDescribes)
 	var workers sync.WaitGroup
