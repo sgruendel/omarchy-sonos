@@ -15,6 +15,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -203,6 +204,9 @@ func (c *Client) Call(ctx context.Context, s Speaker, service, action string, ar
 	return values, nil
 }
 
+// maxConcurrentDescribes bounds device description requests per topology.
+const maxConcurrentDescribes = 8
+
 // ErrIncompleteTopology indicates that some visible rooms could not be described.
 // Topology still returns the reachable rooms alongside this error.
 var ErrIncompleteTopology = errors.New("Sonos topology contains unreachable rooms")
@@ -228,23 +232,47 @@ func (c *Client) Topology(ctx context.Context, s Speaker) ([]Speaker, error) {
 	if err = xml.Unmarshal([]byte(v["ZoneGroupState"]), &state); err != nil {
 		return nil, err
 	}
-	var out []Speaker
-	incomplete := false
+	var members []Speaker
+	var locations []string
 	for _, g := range state.Groups {
 		for _, m := range g.Members {
-			if m.Invisible == "1" {
-				continue
+			if m.Invisible != "1" {
+				members = append(members, Speaker{UID: m.UID, Name: m.Name, Coordinator: g.Coordinator})
+				locations = append(locations, m.Location)
 			}
-			sp, err := c.Describe(ctx, m.Location)
-			if err != nil {
-				incomplete = true
-				continue
-			}
-			sp.UID = m.UID
-			sp.Name = m.Name
-			sp.Coordinator = g.Coordinator
-			out = append(out, sp)
 		}
+	}
+	// Describe members concurrently: with serial requests, each unreachable room
+	// adds a full client timeout and a few of them exhaust the caller's deadline.
+	described := make([]bool, len(members))
+	slots := make(chan struct{}, maxConcurrentDescribes)
+	var workers sync.WaitGroup
+	for i := range members {
+		workers.Go(func() {
+			select {
+			case slots <- struct{}{}:
+				defer func() { <-slots }()
+			case <-ctx.Done():
+				return
+			}
+			sp, err := c.Describe(ctx, locations[i])
+			if err != nil {
+				return
+			}
+			sp.UID, sp.Name, sp.Coordinator = members[i].UID, members[i].Name, members[i].Coordinator
+			// Each worker owns a separate index, read only after workers.Wait.
+			members[i], described[i] = sp, true
+		})
+	}
+	workers.Wait()
+	var out []Speaker
+	incomplete := false
+	for i, sp := range members {
+		if !described[i] {
+			incomplete = true
+			continue
+		}
+		out = append(out, sp)
 	}
 	if len(out) == 0 {
 		return nil, errors.New("Sonos topology contains no reachable rooms")

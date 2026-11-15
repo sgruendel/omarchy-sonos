@@ -8,7 +8,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 func TestTopologyReportsIncompleteVisibleRooms(t *testing.T) {
@@ -53,6 +55,54 @@ func TestTopologyReportsIncompleteVisibleRooms(t *testing.T) {
 				t.Fatalf("reachable topology rooms: %+v, want %d", rooms, tt.wantRooms)
 			}
 		})
+	}
+}
+
+func TestTopologyDescribesMembersConcurrently(t *testing.T) {
+	// Each description is held until all members have requested theirs, so a
+	// serial implementation times out and reports an incomplete topology.
+	const members = 3
+	var mu sync.Mutex
+	arrived := 0
+	all := make(chan struct{})
+	var serverURL string
+	srv := httptest.NewTestServer(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			mu.Lock()
+			if arrived++; arrived == members {
+				close(all)
+			}
+			mu.Unlock()
+			select {
+			case <-all:
+				fmt.Fprint(w, `<root><device><serviceList><service><serviceType>urn:schemas-upnp-org:service:AVTransport:1</serviceType><controlURL>/transport</controlURL></service></serviceList></device></root>`)
+			case <-time.After(time.Second):
+				w.WriteHeader(http.StatusServiceUnavailable)
+			}
+			return
+		}
+		var state strings.Builder
+		state.WriteString(`<ZoneGroupState><ZoneGroups><ZoneGroup Coordinator="M0">`)
+		for i := range members {
+			fmt.Fprintf(&state, `<ZoneGroupMember UUID="M%d" ZoneName="Room %d" Location="%s/m%d"/>`, i, i, serverURL, i)
+		}
+		state.WriteString(`</ZoneGroup></ZoneGroups></ZoneGroupState>`)
+		fmt.Fprintf(w, "<Envelope><Body><Response><ZoneGroupState>%s</ZoneGroupState></Response></Body></Envelope>", escape(state.String()))
+	}))
+	c := New()
+	c.HTTP.Transport = srv.Client().Transport
+	serverURL = srv.URL
+	speaker := Speaker{URL: srv.URL, Services: map[string]Service{
+		"ZoneGroupTopology": {Type: "urn:schemas-upnp-org:service:ZoneGroupTopology:1", Control: "/topology"},
+	}}
+	rooms, err := c.Topology(t.Context(), speaker)
+	if err != nil || len(rooms) != members {
+		t.Fatalf("topology = %d rooms, %v; want %d rooms described concurrently", len(rooms), err, members)
+	}
+	for i, room := range rooms {
+		if want := fmt.Sprintf("M%d", i); room.UID != want || room.Name != fmt.Sprintf("Room %d", i) || room.Coordinator != "M0" || room.URL != srv.URL {
+			t.Fatalf("room %d = %+v, want UID %s with its own name, coordinator and URL", i, room, want)
+		}
 	}
 }
 
