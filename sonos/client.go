@@ -82,7 +82,7 @@ func (c *Client) Describe(ctx context.Context, location string) (Speaker, error)
 	if err != nil || u.Scheme != "http" || u.Host == "" {
 		return Speaker{}, errors.New("invalid speaker URL")
 	}
-	req, err := http.NewRequestWithContext(ctx, "GET", u.String(), nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {
 		return Speaker{}, err
 	}
@@ -91,7 +91,7 @@ func (c *Client) Describe(ctx context.Context, location string) (Speaker, error)
 		return Speaker{}, err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
+	if resp.StatusCode != http.StatusOK {
 		return Speaker{}, fmt.Errorf("speaker description: HTTP %d", resp.StatusCode)
 	}
 	var desc struct {
@@ -193,7 +193,7 @@ func (c *Client) Call(ctx context.Context, s Speaker, service, action string, ar
 		body.WriteString("<" + k + ">" + escape(args[k]) + "</" + k + ">")
 	}
 	body.WriteString("</u:" + action + "></s:Body></s:Envelope>")
-	req, err := http.NewRequestWithContext(ctx, "POST", target.String(), strings.NewReader(body.String()))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, target.String(), strings.NewReader(body.String()))
 	if err != nil {
 		return nil, err
 	}
@@ -217,7 +217,7 @@ func (c *Client) Call(ctx context.Context, s Speaker, service, action string, ar
 	if err != nil {
 		return nil, err
 	}
-	if resp.StatusCode != 200 || values["errorCode"] != "" {
+	if resp.StatusCode != http.StatusOK || values["errorCode"] != "" {
 		return nil, fmt.Errorf("Sonos %s: HTTP %d, UPnP %s %s", action, resp.StatusCode, values["errorCode"], values["errorDescription"])
 	}
 	return values, nil

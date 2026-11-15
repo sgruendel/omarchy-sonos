@@ -57,7 +57,7 @@ type Client struct {
 	UserAgent   string
 }
 
-var ErrCommentsAuth = errors.New("Sign in to Radio Paradise to read song comments")
+var ErrCommentsAuth = errors.New("sign in to Radio Paradise to read song comments")
 
 // RP mixes strings and numbers. Preserve numeric text in interface fields,
 // especially account IDs, instead of rounding it through float64.
@@ -92,7 +92,7 @@ func (c *Client) Load() error {
 	return nil
 }
 func (c *Client) request(ctx context.Context, path string, params url.Values, out any) error {
-	req, err := http.NewRequestWithContext(ctx, "GET", c.Base+path+"?"+params.Encode(), nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.Base+path+"?"+params.Encode(), nil)
 	if err != nil {
 		return errors.New("could not create RP request")
 	}
@@ -113,7 +113,7 @@ func (c *Client) request(ctx context.Context, path string, params url.Values, ou
 		return requestError(err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != 200 {
+	if resp.StatusCode != http.StatusOK {
 		if resp.StatusCode == http.StatusUnauthorized && c.Authenticated() {
 			return errors.New("Radio Paradise session expired; sign in again")
 		}
@@ -159,7 +159,7 @@ func (c *Client) Login(ctx context.Context, username, password string) error {
 	return nil
 }
 func (c *Client) Logout() error {
-	if err := os.Remove(c.SessionPath); err != nil && !os.IsNotExist(err) {
+	if err := os.Remove(c.SessionPath); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return errors.New("could not remove RP session")
 	}
 	c.Session = Session{}

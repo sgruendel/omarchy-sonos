@@ -51,7 +51,7 @@ func LoadPrivate(path string, value any) error {
 
 func load(path string, value any, private bool) error {
 	f, err := os.Open(path)
-	if os.IsNotExist(err) {
+	if errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
 	if err != nil {
