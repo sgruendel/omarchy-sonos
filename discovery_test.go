@@ -285,19 +285,19 @@ func TestProbeLocationsBoundsConcurrencyAndHonorsCancellation(t *testing.T) {
 
 func TestDiscoveryRetryIntervalDependsOnStatus(t *testing.T) {
 	for _, tt := range []struct {
-		status string
+		status Status
 		age    time.Duration
 		want   bool
 	}{
-		{"offline", 11 * time.Second, true},
-		{"offline", 5 * time.Second, false},
-		{"ready", 11 * time.Second, false},
-		{"ready", 61 * time.Second, true},
+		{StatusOffline, 11 * time.Second, true},
+		{StatusOffline, 5 * time.Second, false},
+		{StatusReady, 11 * time.Second, false},
+		{StatusReady, 61 * time.Second, true},
 	} {
-		t.Run(tt.status+tt.age.String(), func(t *testing.T) {
+		t.Run(string(tt.status)+tt.age.String(), func(t *testing.T) {
 			a, _, _, _ := fixture(t)
 			a.Snapshot.Status = tt.status
-			if tt.status == "offline" {
+			if tt.status == StatusOffline {
 				a.Snapshot.Rooms = nil
 			}
 			a.lastDiscovery = time.Now().Add(-tt.age)
@@ -306,7 +306,7 @@ func TestDiscoveryRetryIntervalDependsOnStatus(t *testing.T) {
 			if a.lastDiscovery.After(previous) != tt.want {
 				t.Fatalf("discovery retry = %v, want %v", a.lastDiscovery.After(previous), tt.want)
 			}
-			if tt.want && a.Snapshot.Status != "ready" {
+			if tt.want && a.Snapshot.Status != StatusReady {
 				t.Fatal("successful rediscovery did not recover playback")
 			}
 		})
@@ -319,7 +319,7 @@ func TestPlaybackFailureClearsStaleMetadata(t *testing.T) {
 		return nil, context.DeadlineExceeded
 	})
 	a.Refresh(t.Context(), false)
-	if a.Snapshot.Status != "offline" || a.Snapshot.Playback.Title != "" || a.Snapshot.RP.Song != nil || a.Snapshot.RP.CanRate {
+	if a.Snapshot.Status != StatusOffline || a.Snapshot.Playback.Title != "" || a.Snapshot.RP.Song != nil || a.Snapshot.RP.CanRate {
 		t.Fatal("offline snapshot retained stale playback or rating")
 	}
 }

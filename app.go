@@ -38,18 +38,27 @@ type RadioParadise struct {
 
 func emptyRP() RadioParadise {
 	return RadioParadise{
-		Channel:  -1,
-		Override: -1,
+		Channel:  rp.NoChannel,
+		Override: rp.NoChannel,
 		Comments: rp.Comments{Items: []rp.Comment{}},
 	}
 }
+
+// Status is the backend's overall Sonos connectivity, reported in every snapshot.
+type Status string
+
+const (
+	StatusStarting Status = "starting"
+	StatusReady    Status = "ready"
+	StatusOffline  Status = "offline"
+)
 
 type Snapshot struct {
 	Type           string          `json:"type"`
 	Version        int             `json:"version"`
 	BackendVersion string          `json:"backendVersion"`
 	RPMixes        []rp.Mix        `json:"rpMixes"`
-	Status         string          `json:"status"`
+	Status         Status          `json:"status"`
 	Error          string          `json:"error"`
 	Rooms          []sonos.Speaker `json:"rooms"`
 	Selected       string          `json:"selected"`
@@ -84,7 +93,7 @@ func newApp(dir string, hosts []string) (*App, error) {
 		Sonos:           sonos.New(),
 		RP:              rp.New(filepath.Join(dir, "rp-session.json")),
 		StatePath:       filepath.Join(dir, "state.json"),
-		playlistChannel: -1,
+		playlistChannel: rp.NoChannel,
 		ratings:         map[int64]int{},
 	}
 	if err := storage.Load(a.StatePath, &a.State); err != nil {
@@ -111,7 +120,7 @@ func newApp(dir string, hosts []string) (*App, error) {
 		Version:        1,
 		BackendVersion: version,
 		RPMixes:        rp.Mixes(),
-		Status:         "starting",
+		Status:         StatusStarting,
 		Rooms:          []sonos.Speaker{},
 		RP:             emptyRP(),
 	}
@@ -166,21 +175,21 @@ func (a *App) Refresh(ctx context.Context, force bool) {
 	a.Snapshot.Error = ""
 	a.Snapshot.Account = Account{Authenticated: a.RP.Authenticated(), Username: a.RP.Session.Username}
 	interval := time.Minute
-	if a.Snapshot.Status == "offline" {
+	if a.Snapshot.Status == StatusOffline {
 		interval = 10 * time.Second
 	}
 	if force || time.Since(a.lastDiscovery) >= interval {
 		if err := a.discover(ctx); err != nil {
 			a.Snapshot.Rooms = []sonos.Speaker{}
-			a.Snapshot.Status = "offline"
+			a.Snapshot.Status = StatusOffline
 			a.Snapshot.Error = err.Error()
 		}
 	}
 	a.Snapshot.Selected = a.State.Selected
 	room, coordinator, err := a.targets()
 	if err != nil {
-		a.Snapshot.Status = "offline"
-		a.Snapshot.Playback = sonos.Playback{Actions: []string{}}
+		a.Snapshot.Status = StatusOffline
+		a.Snapshot.Playback = sonos.Playback{Actions: []sonos.TransportAction{}}
 		a.Snapshot.RP = emptyRP()
 		if a.Snapshot.Error == "" {
 			a.Snapshot.Error = err.Error()
@@ -189,14 +198,14 @@ func (a *App) Refresh(ctx context.Context, force bool) {
 	}
 	p, err := a.Sonos.Playback(ctx, coordinator)
 	if err != nil {
-		a.Snapshot.Status = "offline"
+		a.Snapshot.Status = StatusOffline
 		a.Snapshot.Error = err.Error()
-		a.Snapshot.Playback = sonos.Playback{Actions: []string{}}
+		a.Snapshot.Playback = sonos.Playback{Actions: []sonos.TransportAction{}}
 		a.Snapshot.RP = emptyRP()
 		return
 	}
 	a.Snapshot.Playback = p
-	a.Snapshot.Status = "ready"
+	a.Snapshot.Status = StatusReady
 	a.Snapshot.Volume, a.Snapshot.Mute, err = a.Sonos.Volume(ctx, room)
 	if err != nil {
 		a.Snapshot.Error = err.Error()
@@ -211,7 +220,7 @@ func (a *App) refreshRP(ctx context.Context) {
 	if !detected {
 		detected, channel = rp.Detect(p.URI, p.Station)
 	}
-	override := -1
+	override := rp.NoChannel
 	if ch, ok := a.State.Channels[a.State.Selected]; ok {
 		override = ch
 	}
@@ -254,7 +263,7 @@ func (a *App) refreshRP(ctx context.Context) {
 	}
 	next.Song = song
 	next.Matched = true
-	next.CanRate = p.State == "PLAYING" && a.RP.Authenticated()
+	next.CanRate = p.State == sonos.StatePlaying && a.RP.Authenticated()
 	if !a.RP.Authenticated() {
 		next.CommentsError = rp.ErrCommentsAuth.Error()
 		return

@@ -113,7 +113,7 @@ func TestVolumeDeltaClampsWithoutOverflow(t *testing.T) {
 				}
 				return base.RoundTrip(r)
 			})
-			if err := a.Execute(t.Context(), Command{Op: "adjustVolume", Delta: new(tt.delta)}); err != nil || writes != 1 {
+			if err := a.Execute(t.Context(), Command{Op: OpAdjustVolume, Delta: new(tt.delta)}); err != nil || writes != 1 {
 				t.Fatalf("volume command: %v, writes=%d", err, writes)
 			}
 		})

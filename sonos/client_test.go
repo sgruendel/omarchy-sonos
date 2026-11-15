@@ -134,7 +134,7 @@ func TestSOAPTopologyPlaybackAndControls(t *testing.T) {
 	if err = c.SetVolume(ctx, speaker, 101); err == nil {
 		t.Fatal("invalid volume accepted")
 	}
-	if err = c.Transport(ctx, speaker, "Pause"); err != nil {
+	if err = c.Transport(ctx, speaker, ActionPause); err != nil {
 		t.Fatal(err)
 	}
 }

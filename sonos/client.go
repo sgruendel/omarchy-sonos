@@ -35,19 +35,42 @@ type Speaker struct {
 	Coordinator string             `json:"coordinator"`
 	Services    map[string]Service `json:"-"`
 }
+
+// TransportState is the UPnP AVTransport CurrentTransportState of a speaker.
+type TransportState string
+
+const (
+	StatePlaying        TransportState = "PLAYING"
+	StatePausedPlayback TransportState = "PAUSED_PLAYBACK"
+	StateStopped        TransportState = "STOPPED"
+	StateTransitioning  TransportState = "TRANSITIONING"
+	StateNoMediaPresent TransportState = "NO_MEDIA_PRESENT"
+)
+
+// TransportAction is a UPnP AVTransport action. Speakers advertise the currently
+// allowed ones (which may include actions not listed here, such as Seek).
+type TransportAction string
+
+const (
+	ActionPlay     TransportAction = "Play"
+	ActionPause    TransportAction = "Pause"
+	ActionNext     TransportAction = "Next"
+	ActionPrevious TransportAction = "Previous"
+)
+
 type Playback struct {
-	State         string   `json:"state"`
-	Title         string   `json:"title"`
-	Artist        string   `json:"artist"`
-	Album         string   `json:"album"`
-	Artwork       string   `json:"artwork"`
-	URI           string   `json:"uri"`
-	TrackURI      string   `json:"trackUri"`
-	Station       string   `json:"station"`
-	StreamContent string   `json:"streamContent"`
-	Position      int      `json:"position"`
-	Duration      int      `json:"duration"`
-	Actions       []string `json:"actions"`
+	State         TransportState    `json:"state"`
+	Title         string            `json:"title"`
+	Artist        string            `json:"artist"`
+	Album         string            `json:"album"`
+	Artwork       string            `json:"artwork"`
+	URI           string            `json:"uri"`
+	TrackURI      string            `json:"trackUri"`
+	Station       string            `json:"station"`
+	StreamContent string            `json:"streamContent"`
+	Position      int               `json:"position"`
+	Duration      int               `json:"duration"`
+	Actions       []TransportAction `json:"actions"`
 }
 type Client struct{ HTTP *http.Client }
 
@@ -240,13 +263,13 @@ func seconds(s string) int {
 	return h*3600 + m*60 + sec
 }
 func (c *Client) Playback(ctx context.Context, s Speaker) (Playback, error) {
-	p := Playback{Actions: []string{}}
+	p := Playback{Actions: []TransportAction{}}
 	args := map[string]string{"InstanceID": "0"}
 	transport, err := c.Call(ctx, s, "AVTransport", "GetTransportInfo", args)
 	if err != nil {
 		return p, err
 	}
-	p.State = transport["CurrentTransportState"]
+	p.State = TransportState(transport["CurrentTransportState"])
 	pos, err := c.Call(ctx, s, "AVTransport", "GetPositionInfo", args)
 	if err != nil {
 		return p, err
@@ -296,7 +319,7 @@ func (c *Client) Playback(ctx context.Context, s Speaker) (Playback, error) {
 	if err == nil {
 		for _, a := range strings.Split(actions["Actions"], ",") {
 			if a = strings.TrimSpace(a); a != "" {
-				p.Actions = append(p.Actions, a)
+				p.Actions = append(p.Actions, TransportAction(a))
 			}
 		}
 	}
@@ -327,11 +350,11 @@ func (c *Client) SetMute(ctx context.Context, s Speaker, mute bool) error {
 	_, err := c.Call(ctx, s, "RenderingControl", "SetMute", map[string]string{"InstanceID": "0", "Channel": "Master", "DesiredMute": v})
 	return err
 }
-func (c *Client) Transport(ctx context.Context, s Speaker, action string) error {
+func (c *Client) Transport(ctx context.Context, s Speaker, action TransportAction) error {
 	args := map[string]string{"InstanceID": "0"}
-	if action == "Play" {
+	if action == ActionPlay {
 		args["Speed"] = "1"
 	}
-	_, err := c.Call(ctx, s, "AVTransport", action, args)
+	_, err := c.Call(ctx, s, "AVTransport", string(action), args)
 	return err
 }

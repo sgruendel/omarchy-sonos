@@ -91,7 +91,7 @@ func fixture(t *testing.T) (*App, *int, *string, *bool) {
 		}
 	})}
 	a.Refresh(t.Context(), true)
-	if a.Snapshot.Status != "ready" || a.Snapshot.RP.Song == nil {
+	if a.Snapshot.Status != StatusReady || a.Snapshot.RP.Song == nil {
 		t.Fatalf("fixture failed: %+v", a.Snapshot)
 	}
 	return a, &submissions, &title, &changeDuringMetadata
@@ -100,7 +100,7 @@ func TestRatingRevalidatesSongAndRoom(t *testing.T) {
 	for _, scenario := range []string{"current", "stale ID", "changed room", "changed song", "changed during metadata"} {
 		t.Run(scenario, func(t *testing.T) {
 			a, submissions, title, transition := fixture(t)
-			cmd := Command{Op: "rpRate", Room: "RINCON_A", SongID: new(int64(42)), Rating: new(10)}
+			cmd := Command{Op: OpRPRate, Room: "RINCON_A", SongID: new(int64(42)), Rating: new(10)}
 			switch scenario {
 			case "stale ID":
 				cmd.SongID = new(int64(1))
@@ -184,7 +184,7 @@ func TestJSONProtocolAndCredentialPrivacy(t *testing.T) {
 func TestStateDefaultsAndOverrides(t *testing.T) {
 	a, _, _, _ := fixture(t)
 	channel := 1
-	if err := a.Execute(t.Context(), Command{Op: "rpChannel", Channel: &channel}); err != nil {
+	if err := a.Execute(t.Context(), Command{Op: OpRPChannel, Channel: &channel}); err != nil {
 		t.Fatal(err)
 	}
 	restored, err := newApp(filepath.Dir(a.StatePath), nil)
@@ -192,7 +192,7 @@ func TestStateDefaultsAndOverrides(t *testing.T) {
 		t.Fatal("room settings not persisted")
 	}
 	channel = -1
-	if err = a.Execute(t.Context(), Command{Op: "rpChannel", Channel: &channel}); err != nil {
+	if err = a.Execute(t.Context(), Command{Op: OpRPChannel, Channel: &channel}); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := a.State.Channels["RINCON_A"]; ok {
@@ -204,13 +204,13 @@ func TestCommentsAppendAndResetOnSongChange(t *testing.T) {
 	a, _, title, _ := fixture(t)
 	a.Snapshot.RP.Comments.More = true
 	a.Snapshot.RP.Comments.Offset = 20
-	if err := a.Execute(t.Context(), Command{Op: "rpComments", SongID: new(int64(42)), Offset: new(20)}); err != nil {
+	if err := a.Execute(t.Context(), Command{Op: OpRPComments, SongID: new(int64(42)), Offset: new(20)}); err != nil {
 		t.Fatal(err)
 	}
 	if len(a.Snapshot.RP.Comments.Items) != 2 {
 		t.Fatal("page did not append")
 	}
-	if err := a.Execute(t.Context(), Command{Op: "rpComments", SongID: new(int64(43)), Offset: new(0)}); err == nil {
+	if err := a.Execute(t.Context(), Command{Op: OpRPComments, SongID: new(int64(43)), Offset: new(0)}); err == nil {
 		t.Fatal("accepted comments for a stale song")
 	}
 	*title = "New Track"
@@ -251,7 +251,7 @@ func TestGroupedRoomUsesCoordinatorForPlaybackAndRoomForVolume(t *testing.T) {
 		return base.RoundTrip(r)
 	})
 	a.Refresh(t.Context(), false)
-	if err := a.Execute(t.Context(), Command{Op: "adjustVolume", Delta: new(5)}); err != nil {
+	if err := a.Execute(t.Context(), Command{Op: OpAdjustVolume, Delta: new(5)}); err != nil {
 		t.Fatal(err)
 	}
 	if volumeCalls != 5 {
@@ -262,7 +262,7 @@ func TestGroupedRoomUsesCoordinatorForPlaybackAndRoomForVolume(t *testing.T) {
 func TestSigningOutClearsCommentsAndPersonalRating(t *testing.T) {
 	a, _, _, _ := fixture(t)
 	a.ratings[42] = 10
-	if err := a.Execute(t.Context(), Command{Op: "rpLogout"}); err != nil {
+	if err := a.Execute(t.Context(), Command{Op: OpRPLogout}); err != nil {
 		t.Fatal(err)
 	}
 	a.Refresh(t.Context(), false)

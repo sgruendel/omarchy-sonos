@@ -11,9 +11,28 @@ import (
 	"time"
 )
 
+// Op names a command sent by the widget; see docs/protocol.md.
+type Op string
+
+const (
+	OpRefresh      Op = "refresh"
+	OpSelectRoom   Op = "selectRoom"
+	OpPlayPause    Op = "playPause"
+	OpNext         Op = "next"
+	OpPrevious     Op = "previous"
+	OpSetVolume    Op = "setVolume"
+	OpAdjustVolume Op = "adjustVolume"
+	OpSetMute      Op = "setMute"
+	OpRPChannel    Op = "rpChannel"
+	OpRPLogin      Op = "rpLogin"
+	OpRPLogout     Op = "rpLogout"
+	OpRPRate       Op = "rpRate"
+	OpRPComments   Op = "rpComments"
+)
+
 type Command struct {
 	ID       string `json:"id"`
-	Op       string `json:"op"`
+	Op       Op     `json:"op"`
 	Room     string `json:"room"`
 	Volume   *int   `json:"volume"`
 	Delta    *int   `json:"delta"`
@@ -98,7 +117,7 @@ func (a *App) Run(ctx context.Context, in io.Reader, out io.Writer, once bool) e
 			if e := json.MarshalEncode(enc, result); e != nil {
 				return e
 			}
-			if err == nil && c.Op != "refresh" {
+			if err == nil && c.Op != OpRefresh {
 				refresh(false)
 			}
 			if e := emit(); e != nil {

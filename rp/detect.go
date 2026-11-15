@@ -9,6 +9,9 @@ import (
 	"unicode"
 )
 
+// NoChannel means no RP mix: not identified, or no per-room override ("Automatic").
+const NoChannel = -1
+
 var Channels = map[int]string{0: "Main Mix", 1: "Mellow Mix", 2: "RockIt!", 3: "The Globe", 5: "Beyond", 42: "Serenity", 945: "KFAT"}
 
 // Detect recognizes RP stream hosts or RP station labels; unknown mixes remain unknown.
@@ -35,7 +38,7 @@ func Detect(uri, station string) (bool, int) {
 	}
 	isRP := host == "radioparadise.com" || strings.HasSuffix(host, ".radioparadise.com") || host == "radioparadise.stream" || strings.HasSuffix(host, ".radioparadise.stream") || strings.Contains(label, "radio paradise") || strings.Contains(label, "radioparadise")
 	if !isRP {
-		return false, -1
+		return false, NoChannel
 	}
 	text := label + " " + strings.ToLower(decoded)
 	for _, pair := range []struct {
@@ -68,7 +71,7 @@ func Detect(uri, station string) (bool, int) {
 			return true, 0
 		}
 	}
-	return true, -1
+	return true, NoChannel
 }
 func normalized(s string) string {
 	s = html.UnescapeString(strings.ToLower(s))
