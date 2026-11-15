@@ -163,7 +163,10 @@ func (a *App) discover(ctx context.Context) error {
 	}
 	a.Snapshot.Rooms = rooms
 	for _, sp := range rooms {
-		u, _ := url.Parse(sp.URL)
+		u, err := url.Parse(sp.URL)
+		if err != nil {
+			continue // Not cacheable; Describe always produces a valid URL.
+		}
 		host := u.Hostname()
 		if !slices.Contains(a.State.Hosts, host) {
 			a.State.Hosts = append(a.State.Hosts, host)

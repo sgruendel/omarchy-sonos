@@ -75,7 +75,21 @@ type Playback struct {
 }
 type Client struct{ HTTP *http.Client }
 
-func New() *Client { return &Client{HTTP: &http.Client{Timeout: 4 * time.Second}} }
+// New returns a client that only connects to local IP addresses and refuses
+// redirects. Speaker locations come from SSDP replies and other speakers'
+// topology, so a LAN device must not be able to point requests elsewhere.
+func New() *Client {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.Proxy = nil // Speakers are on the LAN; never route through a proxy.
+	transport.DialContext = localDialer(4 * time.Second).DialContext
+	return &Client{HTTP: &http.Client{
+		Timeout:   4 * time.Second,
+		Transport: transport,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}}
+}
 
 func (c *Client) Describe(ctx context.Context, location string) (Speaker, error) {
 	u, err := url.Parse(location)
@@ -100,7 +114,9 @@ func (c *Client) Describe(ctx context.Context, location string) (Speaker, error)
 	if err = xml.NewDecoder(io.LimitReader(resp.Body, 2<<20)).Decode(&desc); err != nil {
 		return Speaker{}, err
 	}
-	s := Speaker{UID: strings.TrimPrefix(desc.Device.UDN, "uuid:"), Name: desc.Device.Name, URL: u.Scheme + "://" + u.Host, Services: map[string]Service{}}
+	// url.URL re-escapes an IPv6 zone (%25eth0); u.Host holds it decoded.
+	origin := url.URL{Scheme: u.Scheme, Host: u.Host}
+	s := Speaker{UID: strings.TrimPrefix(desc.Device.UDN, "uuid:"), Name: desc.Device.Name, URL: origin.String(), Services: map[string]Service{}}
 	var walk func(Device)
 	walk = func(d Device) {
 		for _, v := range d.Services {
@@ -172,7 +188,10 @@ func (c *Client) Call(ctx context.Context, s Speaker, service, action string, ar
 	if !ok {
 		return nil, fmt.Errorf("speaker does not support %s", service)
 	}
-	base, _ := url.Parse(s.URL)
+	base, err := url.Parse(s.URL)
+	if err != nil || base.Host == "" {
+		return nil, errors.New("invalid speaker URL")
+	}
 	path, err := url.Parse(svc.Control)
 	if err != nil {
 		return nil, err
@@ -352,10 +371,10 @@ func (c *Client) Playback(ctx context.Context, s Speaker) (Playback, error) {
 		}
 	}
 	if p.Artwork != "" {
-		base, _ := url.Parse(s.URL)
+		base, baseErr := url.Parse(s.URL)
 		art, e := url.Parse(p.Artwork)
 		p.Artwork = ""
-		if e == nil {
+		if baseErr == nil && e == nil {
 			resolved := base.ResolveReference(art)
 			if (resolved.Scheme == "http" || resolved.Scheme == "https") && resolved.Host != "" {
 				p.Artwork = resolved.String()

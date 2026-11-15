@@ -3,11 +3,13 @@ package sonos
 import (
 	"bufio"
 	"context"
-	"fmt"
+	"errors"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -121,10 +123,46 @@ func ssdpLocation(message string, peer net.IP) string {
 	}
 	return u.String()
 }
-func HostLocation(host string) (string, error) {
-	ip := net.ParseIP(host)
-	if ip == nil || (!ip.IsPrivate() && !ip.IsLoopback() && !ip.IsLinkLocalUnicast()) {
-		return "", fmt.Errorf("speaker host must be a local IP address")
+
+// ErrNotLocal reports a speaker connection to an address outside the LAN.
+var ErrNotLocal = errors.New("speaker address must be a local IP address")
+
+// localAddr parses host as an IP address and reports whether it is private,
+// loopback or link-local. An IPv6 zone (fe80::1%eth0) only selects the
+// interface, so it is ignored for the check but kept in the returned address;
+// link-local IPv6 cannot be dialed without it.
+func localAddr(host string) (netip.Addr, bool) {
+	addr, err := netip.ParseAddr(host)
+	if err != nil {
+		return netip.Addr{}, false
 	}
-	return "http://" + net.JoinHostPort(ip.String(), "1400") + "/xml/device_description.xml", nil
+	addr = addr.Unmap()
+	ip := addr.WithZone("")
+	return addr, ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast()
+}
+
+// localDialer refuses connections to non-local addresses. Control sees the
+// resolved address, so hostnames are covered, before any packet is sent.
+func localDialer(timeout time.Duration) *net.Dialer {
+	return &net.Dialer{
+		Timeout: timeout,
+		Control: func(_, address string, _ syscall.RawConn) error {
+			host, _, err := net.SplitHostPort(address)
+			if _, local := localAddr(host); err != nil || !local {
+				return ErrNotLocal
+			}
+			return nil
+		},
+	}
+}
+
+// HostLocation returns the device description URL for a local speaker IP.
+func HostLocation(host string) (string, error) {
+	addr, local := localAddr(host)
+	if !local {
+		return "", errors.New("speaker host must be a local IP address")
+	}
+	// url.URL escapes an IPv6 zone as %25; plain concatenation would not parse.
+	u := url.URL{Scheme: "http", Host: netip.AddrPortFrom(addr, 1400).String(), Path: "/xml/device_description.xml"}
+	return u.String(), nil
 }
