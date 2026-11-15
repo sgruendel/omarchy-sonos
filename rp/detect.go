@@ -14,8 +14,9 @@ const NoChannel = -1
 
 var Channels = map[int]string{0: "Main Mix", 1: "Mellow Mix", 2: "RockIt!", 3: "The Globe", 5: "Beyond", 42: "Serenity", 945: "KFAT"}
 
-// Detect recognizes RP stream hosts or RP station labels; unknown mixes remain unknown.
-func Detect(uri, station string) (bool, int) {
+// Detect recognizes RP stream hosts or RP station labels. It reports whether
+// the stream is RP and, if the mix is known, its channel; otherwise NoChannel.
+func Detect(uri, station string) (detected bool, channel int) {
 	decoded := html.UnescapeString(uri)
 	for range 3 {
 		v, err := url.QueryUnescape(decoded)
