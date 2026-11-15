@@ -119,11 +119,18 @@ func (c *Client) Describe(ctx context.Context, location string) (Speaker, error)
 	return s, nil
 }
 
-// Values extracts leaf text by local XML name, including escaped DIDL/topology payloads.
+// Values extracts text by local XML name, including escaped DIDL/topology
+// payloads. When several elements share a name, the first one with text wins:
+// DIDL may repeat elements such as albumArtURI, and joining them would corrupt
+// the value.
 func Values(data []byte) (map[string]string, error) {
 	d := xml.NewDecoder(bytes.NewReader(data))
 	out := map[string]string{}
-	var stack []string
+	type element struct {
+		name string
+		text strings.Builder
+	}
+	var stack []*element
 	for {
 		t, err := d.Token()
 		if err == io.EOF {
@@ -134,14 +141,21 @@ func Values(data []byte) (map[string]string, error) {
 		}
 		switch v := t.(type) {
 		case xml.StartElement:
-			stack = append(stack, v.Name.Local)
+			stack = append(stack, &element{name: v.Name.Local})
 		case xml.EndElement:
-			if len(stack) > 0 {
-				stack = stack[:len(stack)-1]
+			if len(stack) == 0 {
+				continue
+			}
+			// Text may arrive in several tokens (e.g. around CDATA), so store it
+			// once the element ends.
+			e := stack[len(stack)-1]
+			stack = stack[:len(stack)-1]
+			if _, seen := out[e.name]; !seen && e.text.Len() > 0 {
+				out[e.name] = e.text.String()
 			}
 		case xml.CharData:
 			if len(stack) > 0 {
-				out[stack[len(stack)-1]] += string(v)
+				stack[len(stack)-1].text.Write(v)
 			}
 		}
 	}
